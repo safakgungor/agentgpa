@@ -112,4 +112,7 @@ export const PACKET_RULES = {
   maxSourceChars: 2000,
   minWords: 3,
   maxSessions: 5000,
+  /** Project folder names in a packet, each cut to this many characters once cleaned. */
+  maxProjects: 200,
+  projectChars: 60,
 } as const;

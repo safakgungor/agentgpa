@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPacket,
+  HOME_FOLDER,
   LANG_CATEGORIES,
   leadingZeroBits,
   PacketSchema,
+  PRIVATE_FOLDER,
   type Session,
   TOOL_FLAGS,
 } from '../src/index.ts';
@@ -44,16 +46,22 @@ describe('the deep read packet', () => {
     ]);
   });
 
-  it('passes the secret corpus and the project names with zero leaks', () => {
+  it('passes the secret corpus with zero leaks, and names a project only in its own list', () => {
     const sessions = leakyPrompts().map((text, i) =>
-      session(i % 2 ? 'codex' : 'claude-code', [
-        prompt(
-          at(1 + (i % 80), 10),
-          `${text} in acme-billing at /Users/someone/work/secret-project`,
-        ),
-      ]),
+      session(
+        i % 2 ? 'codex' : 'claude-code',
+        [
+          prompt(
+            at(1 + (i % 80), 10),
+            `${text} in acme-billing at /Users/someone/work/secret-project`,
+          ),
+        ],
+        { projectName: 'acme-billing' },
+      ),
     );
-    const json = JSON.stringify(packetOf(sessions));
+    const packet = packetOf(sessions);
+    expect(packet.projects).toEqual(['acme-billing']);
+    const json = JSON.stringify({ ...packet, projects: [] });
     for (const secret of secretCorpus()) {
       for (const piece of fragments(secret)) expect(json, secret.slice(0, 6)).not.toContain(piece);
     }
@@ -111,8 +119,52 @@ describe('the deep read packet', () => {
         categories: { Edit: 1, Bash: 2 },
         languages: { rust: 1 },
         commands: { test: 1, build: 0, git: 1, deploy: 0 },
+        day: 88,
       },
     ]);
+  });
+
+  it("names each session's project by its folder alone, never the account or a path", () => {
+    const p = packetOf(
+      [
+        session('claude-code', [prompt(at(3, 9), 'add the refund endpoint to checkout')], {
+          projectName: 'checkout-service',
+          projectKey: 'k-checkout',
+        }),
+        session('codex', [prompt(at(2, 9), 'fix the flaky checkout test please')], {
+          projectName: 'checkout-service',
+          projectKey: 'k-checkout-copy',
+        }),
+        session('claude-code', [prompt(at(2, 10), 'tidy my shell aliases please now')], {
+          projectName: 'dev',
+          projectKey: 'k-home',
+        }),
+        session('codex', [prompt(at(2, 11), 'rename the config keys for me')], {
+          projectName: 'someone',
+          projectKey: 'k-someone',
+        }),
+        session('codex', [prompt(at(1, 9), 'write the onboarding email copy')], {
+          projectName: 'dev@example.com',
+          projectKey: 'k-mail',
+        }),
+        session('claude-code', [prompt(at(1, 10), 'clean up the landing page styles')], {
+          projectName: ' my\u200bsite\u202e ',
+          projectKey: 'k-site',
+        }),
+        session('cursor', [prompt(at(1, 11), 'make the header sticky on scroll')]),
+      ],
+      { homeProjectKey: 'k-home' },
+    );
+    expect(p.projects).toEqual(['checkout-service', HOME_FOLDER, PRIVATE_FOLDER, 'mysite']);
+    expect(p.sessions.map((s) => s.project)).toEqual([0, 0, 1, 2, 2, 3, undefined]);
+    expect(p.sessions.map((s) => s.day)).toEqual([86, 87, 87, 87, 88, 88, 88]);
+    expect(JSON.stringify(p)).not.toMatch(/someone|example\.com|\//);
+    const long = packetOf([
+      session('codex', [prompt(at(1), 'add the importer and its tests')], {
+        projectName: `${'z'.repeat(59)}🙂`,
+      }),
+    ]);
+    expect(long.projects).toEqual(['z'.repeat(59)]);
   });
 
   it("leaves out the agent's own session and refuses any field it does not list", () => {
@@ -122,6 +174,14 @@ describe('the deep read packet', () => {
     );
     expect(p.prompts).toEqual([]);
     expect(() => PacketSchema.parse({ ...p, paths: [] })).toThrow();
+    const named = packetOf([
+      session('codex', [prompt(at(1), 'add the importer and its tests')], { projectName: 'api' }),
+    ]);
+    const past = { ...named, sessions: named.sessions.map((s) => ({ ...s, project: 1 })) };
+    expect(() => PacketSchema.parse(past)).toThrow();
+    expect(() =>
+      PacketSchema.parse({ ...named, prompts: [{ session: 3, week: 0, text: 'x y z' }] }),
+    ).toThrow();
   });
 });
 

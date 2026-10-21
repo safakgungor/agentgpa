@@ -59,12 +59,15 @@ export {
 } from './metrics.ts';
 export {
   buildPacket,
+  HOME_FOLDER,
   PACKET_SCHEMA_VERSION,
   type Packet,
   type PacketOptions,
   type PacketPrompt,
   PacketSchema,
   type PacketSession,
+  PRIVATE_FOLDER,
+  projectLabel,
 } from './packet.ts';
 export {
   type ClaudeFile,

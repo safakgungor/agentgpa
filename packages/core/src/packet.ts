@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cleanText } from './clean.ts';
 import { LANG_CATEGORIES, type LangCategory } from './files.ts';
 import { maskSwears, type RedactionContext, redact } from './redaction.ts';
 import { CATEGORIES, observedWindowStart } from './skeleton.ts';
@@ -7,12 +8,18 @@ import { PACKET_RULES as R } from './thresholds.ts';
 import { type Session, TOOL_FLAGS, type Tool, type ToolCategory } from './types.ts';
 import { ToolSchema } from './wire.ts';
 
-// The deep read packet: a redacted sample of the prompts the user typed, and text-free work
-// signals per session. It is built in memory, sent once right after the report when the user
-// turned the deep read on at /start, read once by our model and dropped. It is never written to
-// disk.
+// The deep read packet: a redacted sample of the prompts the user typed, text-free work signals
+// per session, and the names of the project folders the sessions ran in, so the private chapter
+// can name the user's projects. It is built in memory, sent once right after the report when the
+// user turned the deep read on at /start, read once by our model and dropped. It is never written
+// to disk.
 
-export const PACKET_SCHEMA_VERSION = 1;
+export const PACKET_SCHEMA_VERSION = 2;
+
+/** The name sessions run from the home folder get, since its own name is usually the account's. */
+export const HOME_FOLDER = 'home folder';
+/** The name a folder gets when its own name holds a secret, a contact, an account name or a swear. */
+export const PRIVATE_FOLDER = 'private folder';
 
 const DURATIONS = ['under-10-min', 'under-1-hour', 'under-3-hours', 'longer'] as const;
 type Duration = (typeof DURATIONS)[number];
@@ -26,6 +33,10 @@ export interface PacketSession {
   /** Edited files by language category, from their extensions. */
   languages: Partial<Record<LangCategory, number>>;
   commands: { test: number; build: number; git: number; deploy: number };
+  /** Days since the start of the period, at the session's first event in it. */
+  day: number;
+  /** Index into `projects`, when the tool recorded the folder the session ran in. */
+  project?: number | undefined;
 }
 
 export interface PacketPrompt {
@@ -39,6 +50,8 @@ export interface PacketPrompt {
 export interface Packet {
   schemaVersion: typeof PACKET_SCHEMA_VERSION;
   promptLanguage: string;
+  /** Project folder names: the folder's own name only, never a path, a file or a remote. */
+  projects: string[];
   sessions: PacketSession[];
   prompts: PacketPrompt[];
 }
@@ -52,37 +65,75 @@ export interface PacketOptions {
   /** Orders the sample; the CLI passes its install id. */
   seed: string;
   skipSessionsWith?: string;
+  /** The `projectKey` of the home folder: sessions run there are named `HOME_FOLDER`. */
+  homeProjectKey?: string;
 }
 
 const count = z.number().int().min(0).safe();
 const categoryNames = CATEGORIES as unknown as [string, ...string[]];
 const languageNames = LANG_CATEGORIES as unknown as [string, ...string[]];
 
-export const PacketSchema = z.strictObject({
-  schemaVersion: z.literal(PACKET_SCHEMA_VERSION),
-  promptLanguage: z.string().regex(/^[a-z]{3}$/),
-  sessions: z
-    .array(
-      z.strictObject({
-        tool: ToolSchema,
-        duration: z.enum(DURATIONS),
-        prompts: count,
-        categories: z.partialRecord(z.enum(categoryNames), count),
-        languages: z.partialRecord(z.enum(languageNames), count),
-        commands: z.strictObject({ test: count, build: count, git: count, deploy: count }),
-      }),
-    )
-    .max(R.maxSessions),
-  prompts: z
-    .array(
-      z.strictObject({
-        session: count,
-        week: count.max(60),
-        text: z.string().min(1).max(R.promptChars),
-      }),
-    )
-    .max(R.maxPrompts),
-});
+export const PacketSchema = z
+  .strictObject({
+    schemaVersion: z.literal(PACKET_SCHEMA_VERSION),
+    promptLanguage: z.string().regex(/^[a-z]{3}$/),
+    projects: z.array(z.string().min(1).max(R.projectChars)).max(R.maxProjects),
+    sessions: z
+      .array(
+        z.strictObject({
+          tool: ToolSchema,
+          duration: z.enum(DURATIONS),
+          prompts: count,
+          categories: z.partialRecord(z.enum(categoryNames), count),
+          languages: z.partialRecord(z.enum(languageNames), count),
+          commands: z.strictObject({ test: count, build: count, git: count, deploy: count }),
+          day: count.max(366),
+          project: count.optional(),
+        }),
+      )
+      .max(R.maxSessions),
+    prompts: z
+      .array(
+        z.strictObject({
+          session: count,
+          week: count.max(60),
+          text: z.string().min(1).max(R.promptChars),
+        }),
+      )
+      .max(R.maxPrompts),
+  })
+  .refine(
+    (p) =>
+      p.sessions.every((s) => s.project === undefined || s.project < p.projects.length) &&
+      p.prompts.every((x) => x.session < p.sessions.length),
+    'an index points past its list',
+  );
+
+/**
+ * The name a session's project folder gets in the packet: the folder's own name, cleaned, or a
+ * stand-in when it would give away more than the project. None when the tool recorded no folder.
+ */
+export function projectLabel(
+  session: Pick<Session, 'projectKey' | 'projectName'>,
+  options: Pick<PacketOptions, 'context' | 'homeProjectKey'>,
+): string | undefined {
+  if (options.homeProjectKey && session.projectKey === options.homeProjectKey) return HOME_FOLDER;
+  const name = cleanText(session.projectName ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!name) return undefined;
+  // The name itself is what we send, so only the other placeholders apply to it.
+  const redacted = redact(name, { ...options.context, projects: [] });
+  if (redacted.kinds.length > 0 || redacted.text !== name || maskSwears(name) !== name)
+    return PRIVATE_FOLDER;
+  // Cut by whole characters, within the schema's length in UTF-16 units.
+  let out = '';
+  for (const ch of name) {
+    if (out.length + ch.length > R.projectChars) break;
+    out += ch;
+  }
+  return out;
+}
 
 /** A stable 0 to 1 order for a prompt, from the seed and its place. */
 function order(seed: string, key: string): number {
@@ -102,6 +153,8 @@ function durationOf(minutes: number): Duration {
 export function buildPacket(all: readonly Session[], options: PacketOptions): Packet {
   const start = options.end - options.days * 86_400_000;
   const sessions: PacketSession[] = [];
+  const projects: string[] = [];
+  const projectIndex = new Map<string, number>();
   const buckets = new Map<
     string,
     { session: number; week: number; text: string; rank: number }[]
@@ -131,6 +184,13 @@ export function buildPacket(all: readonly Session[], options: PacketOptions): Pa
     }
     const first = events[0]?.ts ?? from;
     const last = events.at(-1)?.ts ?? first;
+    const label = projectLabel(session, options);
+    let project = label === undefined ? undefined : projectIndex.get(label);
+    if (label !== undefined && project === undefined && projects.length < R.maxProjects) {
+      project = projects.length;
+      projects.push(label);
+      projectIndex.set(label, project);
+    }
     sessions.push({
       tool: session.tool,
       duration: durationOf((last - first) / 60_000),
@@ -138,6 +198,8 @@ export function buildPacket(all: readonly Session[], options: PacketOptions): Pa
       categories,
       languages,
       commands,
+      day: Math.min(366, Math.max(0, Math.floor((first - start) / 86_400_000))),
+      ...(project === undefined ? {} : { project }),
     });
     prompts.forEach((p, i) => {
       // Only what the user typed: no code, no pasted logs or traces, no long blobs.
@@ -173,6 +235,7 @@ export function buildPacket(all: readonly Session[], options: PacketOptions): Pa
   return PacketSchema.parse({
     schemaVersion: PACKET_SCHEMA_VERSION,
     promptLanguage: /^[a-z]{3}$/.test(options.promptLanguage) ? options.promptLanguage : 'und',
+    projects,
     sessions,
     prompts: picked,
   });

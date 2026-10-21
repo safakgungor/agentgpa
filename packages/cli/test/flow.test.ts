@@ -5,7 +5,13 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
-import { COURSE_NAMES, leadingZeroBits, PacketSchema, PayloadSchema } from '@agentgpa/core';
+import {
+  COURSE_NAMES,
+  leadingZeroBits,
+  type Packet,
+  PacketSchema,
+  PayloadSchema,
+} from '@agentgpa/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parseClaude, parseCodex, parseCursor } from '../../core/test/fixtures.ts';
 import { type Io, runScan } from '../src/run.ts';
@@ -203,6 +209,10 @@ describe('a run with a code from /start', () => {
       deepRead: true,
     });
     expect(seen.packets).toHaveLength(1);
+    // The fixtures' synthetic project folders, by their own names only, never a path.
+    const packet = seen.packets[0] as Packet;
+    expect(packet.projects.length).toBeGreaterThan(0);
+    for (const name of packet.projects) expect(name).not.toMatch(/[/\\]/);
     expect(t.out.join('\n')).toContain('research off · deep read sent, read once and dropped');
   });
 

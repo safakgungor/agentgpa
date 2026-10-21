@@ -73,7 +73,8 @@ Only when you turned the deep read on at agentgpa.dev/start. It is built in memo
 | Field | What it holds |
 | --- | --- |
 | `schemaVersion`, `promptLanguage` | The packet version and your prompts' main language |
-| `sessions` | Per session: tool, length bucket, prompt count, tool calls by category, edited files by language category, and how many test, build, git and deploy commands ran |
+| `projects` | The names of the project folders your sessions ran in, so your private chapter can name your projects: the folder's own name only (`checkout-service`, never `/Users/you/work/checkout-service`), cut to 60 characters. Sessions run from your home folder say `home folder`, and a folder whose name holds a secret, a contact, your account or host name, or a swear says `private folder`. Cursor records no folder, so its sessions have none |
+| `sessions` | Per session: tool, length bucket, prompt count, tool calls by category, edited files by language category, how many test, build, git and deploy commands ran, the day of the period it started on, and which of `projects` it ran in |
 | `prompts` | Up to 600 prompts you typed, sampled across tools and weeks: each redacted as above (secrets, ids, contacts, home paths, project and account names become placeholders), swears masked, cut to 280 characters, with its session and week |
 
 Never in the packet: the agent's replies, tool output, file contents, code blocks, pasted errors and logs, prompts over 2,000 characters, and prompts of fewer than three words.

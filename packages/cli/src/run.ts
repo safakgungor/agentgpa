@@ -255,6 +255,8 @@ function packetFor(s: Scanned, installId: string, code: string | undefined): Pac
     promptLanguage: s.report.device.promptLanguage,
     context: s.context,
     seed: installId,
+    // Sessions run from the home folder are named for it, never for the account it is named after.
+    ...(s.context.home ? { homeProjectKey: sha256(s.context.home) } : {}),
     ...(code ? { skipSessionsWith: code } : {}),
   });
 }
