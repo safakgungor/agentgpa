@@ -8,3 +8,9 @@ minimumReleaseAge: 20160
 # without it.
 allowBuilds:
   esbuild: false
+
+# vitest takes vite as a peer, and vite 8.3.0 to 8.3.2 have a high advisory
+# (GHSA-587h-7wmj-h5pm) and two moderate ones. The tree takes 8.3.3 or newer until vitest's own
+# range does.
+overrides:
+  vite: ^8.3.3
