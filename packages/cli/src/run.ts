@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { chmodSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -9,77 +8,61 @@ import {
   buildPayload,
   buildReport,
   LINK_CODE,
-  localClock,
   observedWindowStart,
   type Packet,
   type Payload,
-  PayloadSchema,
   type RedactionContext,
   type Report,
+  type RunConsents,
   type RunToken,
   SecretScanner,
   type Session,
-  type TelemetryEvent,
   TOOLS,
   type Tool,
 } from '@agentgpa/core';
 import pkg from '../package.json' with { type: 'json' };
-import { AGENT_OUTPUT_LIMIT, renderAgentRun, renderUploaded } from './agent.ts';
+import { AGENT_OUTPUT_LIMIT, renderAgentRun, renderAgentStop } from './agent.ts';
 import { type Api, ApiError, createApi } from './api.ts';
 import { openInBrowser, reportUrl } from './browser.ts';
-import { configDir, loadConfig, saveConfig } from './config.ts';
-import { askConsent, type ConsentQuote, type ConsentState, renderConsent } from './consent.ts';
+import { configDir, loadConfig } from './config.ts';
 import { discover } from './discover.ts';
 import { checkFiles, type Forensics, withoutExcluded } from './forensics.ts';
-import { invocation, type Program, thisProgram } from './invocation.ts';
-import { CTRL_C, ENTER, ESCAPE, type KeyReader, terminalKeys } from './keys.ts';
 import { detectLanguage } from './language.ts';
 import { apiOrigin, createNet, NetError, type Origin } from './net.ts';
-import { clearPending, readPending, removePending, writePending } from './pending.ts';
-import { renderPreview } from './preview.ts';
-import { debugReport, gradesSummary } from './report.ts';
+import { debugReport } from './report.ts';
 import { scan, sha256 } from './scan.ts';
 import {
-  pausedFooter,
-  renderClaimWait,
+  codeRefusal,
+  renderOffline,
   renderPaused,
-  renderSent,
-  renderTelemetryQuestion,
+  renderRunDone,
+  renderStartOnWebsite,
 } from './screens.ts';
-import { detectStyle, ESC, type Style } from './terminal.ts';
+import { detectStyle, type Style } from './terminal.ts';
 
-// One run of the CLI: read the sessions, grade them, show the card, and, only after a yes,
-// upload the payload. Nothing streams in the background and nothing is sent without the
-// consent step (or `--yes`, which still prints it). `--offline`, `--dry-run` and `--json` make
-// no network call at all.
+// One run of the CLI. The owner says yes on agentgpa.dev/start, which gives the link code; with
+// it the CLI reads the sessions, sends what that yes covers and points back to the site, where
+// the report is. It shows no result anywhere: no grades, no quotes, no findings, so neither the
+// terminal nor the user's agent sees them. Without a code it reads nothing. `--offline`,
+// `--dry-run`, `--json` and `--show-packet` make no network call at all.
 
 export const VERSION = pkg.version;
 const MAX_UPLOAD_BYTES = 1024 * 1024;
-const CLAIM_WAIT_MS = 10 * 60_000;
-const CLAIM_POLL_MS = 3000;
+/** How long the deep read keeps trying while the server's readers are busy. */
+const DEEP_READ_WAIT_MS = 10 * 60_000;
+const DEEP_READ_RETRY_MS = 3000;
 
 export interface ScanOptions {
   dryRun?: boolean;
   debug?: boolean;
   offline?: boolean;
-  details?: boolean;
   root?: string;
   since?: string;
   tools?: string;
-  yes?: boolean;
   json?: boolean;
   agent?: boolean;
   code?: string;
-  deepRead?: boolean;
   showPacket?: boolean;
-}
-
-export interface UploadOptions {
-  code?: string;
-  dropQuotes?: string;
-  deepRead?: boolean;
-  /** `--no-research` sets this to false. */
-  research?: boolean;
 }
 
 export interface Io {
@@ -91,13 +74,11 @@ export interface Io {
   home?: string;
   timeZone?: string;
   style?: Style;
-  /** Key presses; null means none (not a terminal). Tests pass scripted keys. */
-  keys?: KeyReader | null;
   fetch?: typeof fetch;
   /** Opens a report page; tests record it instead. */
   open?: (url: URL) => boolean;
   sleep?: (ms: number) => Promise<void>;
-  /** A clock for the waits (tests move it). */
+  /** A clock for the timings and the deep read's retries (tests move it). */
   clock?: () => number;
   /** Where `--dry-run` writes its file. */
   cwd?: string;
@@ -105,8 +86,6 @@ export interface Io {
   powWorkers?: number;
   /** Stands in for agentgpa.dev (tests only; users cannot reach this). */
   officialApi?: string;
-  /** How this CLI was started, for the command it prints in agent mode (tests pass one). */
-  program?: Program;
 }
 
 const PERIODS = new Map([
@@ -155,7 +134,6 @@ interface Scanned {
   tools: { tool: Tool; found: boolean; readable: boolean }[];
   forensics: Forensics;
   context: RedactionContext;
-  claudeCleanupDays: number;
   scanMs: number;
   debug: string;
   end: number;
@@ -218,7 +196,6 @@ async function read(
       claudeCleanupFromSettings: discovery.claude.cleanupFromSettings,
       scanMs,
     }),
-    gradesSummary(report),
     `  file checks: ${forensics.excludedSessions} sessions left out; agent's own session skipped: ${report.device.skippedSessions}`,
   ].join('\n');
   return {
@@ -228,7 +205,6 @@ async function read(
     tools: scans.map((s) => ({ tool: s.tool, found: s.found, readable: s.readable })),
     forensics,
     context,
-    claudeCleanupDays: discovery.claude.cleanupPeriodDays,
     scanMs,
     debug,
     end: o.end,
@@ -249,8 +225,7 @@ function payloadFor(
     platform: NodeJS.Platform;
     runMode: 'terminal' | 'agent';
     origin: Origin;
-    consents: { researchAggregates: boolean; deepRead: boolean };
-    dropQuotes?: number[];
+    consents: RunConsents;
     runToken?: string;
     report?: Report;
   },
@@ -267,7 +242,6 @@ function payloadFor(
     origin: o.origin.isDefault ? 'default' : 'custom',
     root: s.customRoot ? 'custom' : 'default',
     consents: o.consents,
-    ...(o.dropQuotes ? { dropQuotes: o.dropQuotes } : {}),
     ...(o.runToken ? { runToken: o.runToken } : {}),
     forensics: { excludedSessions: s.forensics.excludedSessions, reasons: s.forensics.reasons },
   });
@@ -285,21 +259,6 @@ function packetFor(s: Scanned, installId: string, code: string | undefined): Pac
   });
 }
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-/** The quotes as the consent screen and agent mode show them. */
-function quoteViews(report: Report, timeZone: string): ConsentQuote[] {
-  const clock = localClock(timeZone);
-  const start = Date.parse(report.skeleton.period.start);
-  return report.quotes.map((q) => {
-    if (q.kind === 'most_repeated')
-      return { kind: q.kind, text: q.text, meta: `${q.count ?? 0} times` };
-    const t = clock(start + ((report.skeleton.prompts[q.prompt]?.[1] ?? 0) as number) * 60_000);
-    const meta = `${WEEKDAYS[t.weekday]} ${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`;
-    return { kind: q.kind, text: q.text, meta };
-  });
-}
-
 function versionBelow(a: string, b: string): boolean {
   const pa = a.split(/[.-]/).map(Number);
   const pb = b.split(/[.-]/).map(Number);
@@ -309,127 +268,74 @@ function versionBelow(a: string, b: string): boolean {
   return false;
 }
 
-interface Online {
-  api: Api;
-  origin: Origin;
-  token?: RunToken;
-  /** Why nothing can be uploaded, when nothing can. */
-  blocked?: string;
-  paused?: string | true;
-  /** The server takes opt-in usage counts. */
-  telemetry?: boolean;
-}
+/** A run token for the code, or why there is none. */
+type Online =
+  | { api: Api; token: RunToken }
+  | { paused: string | true }
+  | { stop: string; exitCode: number };
 
 /** The status check and the run token, both before the scan (the token proves when it began). */
-async function goOnline(
-  origin: Origin,
-  installId: string,
-  code: string | undefined,
-  io: Io,
-): Promise<Online> {
+async function goOnline(origin: Origin, installId: string, code: string, io: Io): Promise<Online> {
   const api = createApi(
     createNet(origin, io.fetch ?? fetch),
     io.sleep ? { sleep: io.sleep } : {},
     io.powWorkers,
   );
   const status = await api.status(VERSION);
-  if (!status)
-    return {
-      api,
-      origin,
-      blocked: `Couldn't reach ${origin.host}, so nothing can be sent right now.`,
-    };
+  if (!status) return { stop: `Couldn't reach ${origin.host}, so nothing was read.`, exitCode: 1 };
   if (status.revoked || versionBelow(VERSION, status.minimum)) {
     return {
-      api,
-      origin,
-      blocked: `This version can no longer upload. Run npx agentgpa@${status.current} instead.`,
+      stop: `This version can no longer send. Run npx agentgpa@${status.current} with the same code.`,
+      exitCode: 1,
     };
   }
-  const telemetry = status.telemetry === true;
-  if (status.uploads === 'paused') {
-    return { api, origin, paused: status.message ?? true, telemetry };
-  }
+  if (status.uploads === 'paused') return { paused: status.message ?? true };
   try {
-    const token = await api.runToken({ installId, cliVersion: VERSION, ...(code ? { code } : {}) });
-    return { api, origin, token, telemetry };
+    return { api, token: await api.runToken({ installId, cliVersion: VERSION, code }) };
   } catch (error) {
-    if (error instanceof ApiError && (error.status === 404 || error.status === 410) && code) {
-      return {
-        api,
-        origin,
-        blocked: 'That link code is no longer valid. Open /start for a new one.',
-        telemetry,
-      };
-    }
+    if (error instanceof ApiError && [404, 409, 410].includes(error.status))
+      return { stop: codeRefusal(error.status, origin.host), exitCode: 1 };
     if (error instanceof ApiError || error instanceof NetError) {
       return {
-        api,
-        origin,
-        blocked: `${origin.host} did not hand out a run token, so nothing can be sent right now.`,
-        telemetry,
+        stop: `${origin.host} did not start the run, so nothing was read. Try again in a few minutes.`,
+        exitCode: 1,
       };
     }
     throw error;
   }
 }
 
-/** One run's opt-in usage counts, and how they leave once the run ends (if they may). */
-interface RunTelemetry {
-  events: Map<TelemetryEvent, number>;
-  send?: () => Promise<void>;
-}
-
-const counted = (tel: RunTelemetry, name: TelemetryEvent) =>
-  tel.events.set(name, Math.min(100, (tel.events.get(name) ?? 0) + 1));
-
-/** Asks once whether usage counts may go; undefined when nobody can answer here. */
-async function askTelemetry(io: Io, style: Style): Promise<boolean | undefined> {
-  const keys = io.keys === undefined ? terminalKeys() : io.keys;
-  if (!keys) return undefined;
-  try {
-    io.out(renderTelemetryQuestion(style).join('\n'));
-    const key = await waitForKey(keys, (k) =>
-      ['y', 'Y', 'n', 'N', ESCAPE, CTRL_C, ...ENTER].includes(k),
-    );
-    if (key === undefined) return undefined;
-    const yes = key === 'y' || key === 'Y';
-    io.out(
-      yes
-        ? 'Thanks. Usage counts are on. Change it any time in ~/.agentgpa/config.json.'
-        : 'No usage counts. Change it any time in ~/.agentgpa/config.json.',
-    );
-    return yes;
-  } finally {
-    if (io.keys === undefined) keys.close();
-  }
-}
-
-async function waitForKey(
-  keys: KeyReader,
-  accept: (key: string) => boolean,
-): Promise<string | undefined> {
+/** The deep read: the packet is built in memory, sent once and dropped. */
+async function sendDeepRead(api: Api, token: string, packet: Packet, io: Io): Promise<boolean> {
+  const clock = io.clock ?? Date.now;
+  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const deadline = clock() + DEEP_READ_WAIT_MS;
+  // The route answers 429 with a Retry-After while its readers are busy, and the client tries
+  // again until its time is up. Any other refusal, the daily limit among them, ends it at once.
   for (;;) {
-    const key = await keys.next();
-    if (key === undefined || accept(key)) return key;
+    try {
+      await api.sendDeepRead(token, packet);
+      return true;
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status === 429 &&
+        error.retryAfterMs !== undefined &&
+        clock() < deadline
+      ) {
+        await sleep(Math.max(DEEP_READ_RETRY_MS, error.retryAfterMs));
+        continue;
+      }
+      return false;
+    }
   }
 }
 
 /**
- * Reads the sessions on this machine (or under `--root`), grades them and prints the report
- * card; then, after a yes, uploads the payload. Returns the exit code. The run's opt-in usage
- * counts, when they may go, leave once at its end.
+ * Reads the sessions on this machine (or under `--root`) and sends what the owner said yes to on
+ * /start, for the link code given; prints no result. Returns the exit code.
  */
 export async function runScan(options: ScanOptions, io: Io): Promise<number> {
-  const tel: RunTelemetry = { events: new Map() };
-  try {
-    return await scanRun(options, io, tel);
-  } finally {
-    await tel.send?.();
-  }
-}
-
-async function scanRun(options: ScanOptions, io: Io, tel: RunTelemetry): Promise<number> {
   const days = parseSince(options.since);
   if (days === undefined) {
     io.err('--since takes 7d, 14d, 30d or 90d.');
@@ -467,46 +373,48 @@ async function scanRun(options: ScanOptions, io: Io, tel: RunTelemetry): Promise
   const style = options.agent
     ? { color: false, truecolor: false }
     : (io.style ?? detectStyle(env, process.stdout.isTTY === true));
-  const dir = configDir(env);
-  const config = loadConfig(dir);
-  // A new scan drops any pending agent-mode payload (they last 30 minutes at most anyway).
-  clearPending(dir);
+  const config = loadConfig(configDir(env));
+  const say = (lines: string[]) => io.out(lines.join('\n'));
+  const stop = (message: string, exitCode: number) => {
+    if (options.agent) io.out(renderAgentStop(VERSION, message));
+    else io.out(message);
+    return exitCode;
+  };
 
-  const offline = options.offline || options.dryRun || options.json || options.showPacket;
+  const local = options.offline || options.dryRun || options.json || options.showPacket;
+  if (!local && !options.code) {
+    // The way in is the website: say yes there, then run the command it gives. Nothing is read.
+    if (options.agent) {
+      return stop(
+        `No link code. Tell the user to start at ${origin.host}/start, say yes there and paste the prompt it gives.`,
+        2,
+      );
+    }
+    say([`AGENTGPA ${VERSION}`, ...renderStartOnWebsite(origin.host, style)]);
+    return 0;
+  }
+
   let online: Online | undefined;
-  if (!offline) {
+  if (!local && options.code) {
     if (!origin.isDefault && !options.agent) {
       io.out(
         `Using ${origin.host}, not agentgpa.dev: this run is report only, and the deep read is off.`,
       );
     }
     online = await goOnline(origin, config.installId, options.code, io);
-    counted(tel, 'cli_run');
-    if (online.telemetry && !options.agent && !options.yes) {
-      const choice = config.telemetry ?? (await askTelemetry(io, style));
-      if (choice !== undefined && config.telemetry === undefined) {
-        saveConfig(dir, { ...config, telemetry: choice });
-      }
-      if (choice === true) {
-        const api = online.api;
-        const run = randomUUID();
-        tel.send = () =>
-          api.telemetry({
-            run,
-            cliVersion: VERSION,
-            events: [...tel.events].map(([name, n]) => ({ name, n })),
-          });
-      }
-    }
-    if (online.paused && !options.agent && !options.json) {
-      io.out(
-        renderPaused(online.paused === true ? undefined : online.paused, origin.host, style).join(
-          '\n',
-        ),
-      );
+    if ('stop' in online) return stop(online.stop, online.exitCode);
+    if ('paused' in online) {
+      if (options.agent)
+        return stop(
+          'Uploads are paused for a few minutes. Nothing was read or sent. Ask the user to try again later.',
+          0,
+        );
+      say(renderPaused(online.paused === true ? undefined : online.paused, origin.host, style));
+      return 0;
     }
   }
 
+  const clock = io.clock ?? Date.now;
   const scanned = await read(
     {
       ...(root ? { root } : {}),
@@ -520,9 +428,9 @@ async function scanRun(options: ScanOptions, io: Io, tel: RunTelemetry): Promise
     io,
     env,
   );
+  const readSeconds = scanned.scanMs / 1000;
   const { report } = scanned;
   const hasPrompts = report.metrics.userPrompts > 0;
-
   if (options.debug) io.out(`${scanned.debug}\n`);
   const consentsOff = { researchAggregates: false, deepRead: false };
 
@@ -551,29 +459,6 @@ async function scanRun(options: ScanOptions, io: Io, tel: RunTelemetry): Promise
     io.out('This is exactly the deep read packet. It was not sent.');
     return 0;
   }
-  if (options.agent) {
-    return agentRun(
-      scanned,
-      { origin, online, code: options.code, timeZone, platform, dir, ...(root ? { root } : {}) },
-      io,
-    );
-  }
-
-  const who = online?.token?.account;
-  const canUpload = hasPrompts && online?.token !== undefined;
-  io.out(
-    renderPreview(report, {
-      style,
-      tools: scanned.tools,
-      scanMs: scanned.scanMs,
-      days,
-      claudeCleanupDays: scanned.claudeCleanupDays,
-      details: options.details === true,
-      ...(who ? { who } : {}),
-      footer: online?.paused ? 'none' : canUpload ? 'enter' : 'plain',
-    }),
-  );
-  counted(tel, 'cli_preview_shown');
   if (options.dryRun) {
     if (!hasPrompts) {
       io.out('Dry run: no prompts in this period, so there is nothing to write. Nothing was sent.');
@@ -596,409 +481,104 @@ async function scanRun(options: ScanOptions, io: Io, tel: RunTelemetry): Promise
     );
     return 0;
   }
-  if (online?.paused) {
-    io.out(pausedFooter(style).join('\n'));
-    return 0;
-  }
-  if (!hasPrompts || offline) return 0;
-  if (!online?.token) {
-    if (online?.blocked) io.out(online.blocked);
-    return 0;
-  }
-  return terminalUpload(
-    scanned,
-    {
-      online,
-      token: online.token,
-      options,
-      style,
-      timeZone,
-      platform,
-      installId: config.installId,
-      tel,
-    },
-    io,
-  );
-}
-
-async function terminalUpload(
-  s: Scanned,
-  o: {
-    online: Online;
-    token: RunToken;
-    options: ScanOptions;
-    style: Style;
-    timeZone: string;
-    platform: NodeJS.Platform;
-    installId: string;
-    tel: RunTelemetry;
-  },
-  io: Io,
-): Promise<number> {
-  const { online, style, options } = o;
-  const keys = (io.keys === undefined ? terminalKeys() : io.keys) ?? null;
-  if (!keys && !options.yes) {
-    io.out('To upload, run this in a terminal, or add --yes to upload after the summary.');
-    return 0;
-  }
-  try {
-    if (!options.yes && keys) {
-      const key = await waitForKey(
-        keys,
-        (k) => ENTER.includes(k) || [CTRL_C, ESCAPE, 'q', 'n'].includes(k),
-      );
-      if (key === undefined || !ENTER.includes(key)) {
-        io.out('Nothing was sent.');
-        return 0;
-      }
-    }
-    let packet: Packet | undefined;
-    const packetOnce = () => {
-      packet ??= packetFor(s, o.installId, options.code);
-      return packet;
-    };
-    const deepReadPrompts = online.origin.isDefault ? packetOnce().prompts.length : 0;
-    const view = {
-      sessions: s.report.metrics.sessions,
-      secrets: s.report.device.secrets.pasted + s.report.device.secrets.exposedViaTools,
-      quotes: quoteViews(s.report, o.timeZone),
-      deepReadPrompts,
-      host: online.origin.host,
-    };
-    let state: ConsentState = {
-      dropped: new Set(),
-      deepRead: options.deepRead === true && deepReadPrompts > 0,
-      research: true,
-    };
-    if (options.yes || !keys) {
-      io.out(renderConsent(view, state, style).join('\n'));
-    } else {
-      const answer = await askConsent({
-        view,
-        initial: state,
-        style,
-        keys,
-        out: io.out,
-        redraw: style.color,
-        showPacket: () => {
-          io.out(JSON.stringify(packetOnce(), null, 2));
-          io.out('That is exactly the deep read packet. Nothing has been sent.');
+  if (!online || !('token' in online)) {
+    // --offline: what was found and what a run would send.
+    say(
+      renderOffline(
+        {
+          version: VERSION,
+          tools: scanned.tools,
+          sessions: report.metrics.sessions,
+          days,
+          readSeconds,
+          quotes: report.quotes.length,
         },
-      });
-      if (!answer.upload) {
-        io.out('Nothing was sent.');
-        return 0;
-      }
-      state = answer.state;
-    }
-    counted(o.tel, 'cli_consent_given');
-
-    const payload = payloadFor(s, {
-      timeZone: o.timeZone,
-      platform: o.platform,
-      runMode: 'terminal',
-      origin: online.origin,
-      consents: { researchAggregates: state.research, deepRead: state.deepRead },
-      dropQuotes: [...state.dropped],
-      runToken: o.token.runToken,
-    });
-    if (gzipSync(JSON.stringify(payload)).length > MAX_UPLOAD_BYTES) {
-      io.out('This report is larger than the server takes (1 MB gzipped). Try --since 30d.');
-      return 1;
-    }
-    const clock = io.clock ?? Date.now;
-    const started = clock();
-    let accepted: Awaited<ReturnType<Api['upload']>>;
-    try {
-      accepted = await online.api.upload(payload, o.token.runToken);
-    } catch (error) {
-      const why =
-        error instanceof ApiError
-          ? `the server answered ${error.status}`
-          : 'the server could not be reached';
-      io.out(`The upload did not go through: ${why}. Run npx agentgpa again in a few minutes.`);
-      return 1;
-    }
-    const linked = options.code !== undefined;
-    const page = reportUrl(
-      linked ? '/start' : (accepted.reportUrl ?? accepted.claimUrl ?? ''),
-      online.origin,
+        style,
+      ),
     );
-    const opened = page
-      ? (io.open ?? ((u) => openInBrowser(u, io.env ?? process.env, o.platform)))(page)
-      : false;
-    if (page) {
-      io.out(
-        renderSent(
-          { quotes: payload.quotes.length, seconds: (clock() - started) / 1000, page, opened },
-          style,
-        ).join('\n'),
-      );
-    }
-    if (state.deepRead && accepted.deepReadToken) {
-      await deepRead(online.api, accepted.deepReadToken, packetOnce(), { linked, keys, style, io });
-    }
     return 0;
-  } finally {
-    if (io.keys === undefined) keys?.close();
   }
-}
 
-/** The deep read: waits for the claim (packet in memory only), sends it once, then drops it. */
-async function deepRead(
-  api: Api,
-  token: string,
-  packet: Packet,
-  o: { linked: boolean; keys: KeyReader | null; style: Style; io: Io },
-): Promise<void> {
-  const { io, style } = o;
-  const clock = io.clock ?? Date.now;
-  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const deadline = clock() + CLAIM_WAIT_MS;
-  if (!o.linked) {
-    let drawn = 0;
-    let frame = 0;
-    const draw = () => {
-      const lines = renderClaimWait(deadline - clock(), frame++, style);
-      io.out(
-        style.color && drawn ? `${ESC}[${drawn}A${ESC}[J${lines.join('\n')}` : lines.join('\n'),
-      );
-      drawn = lines.length;
-    };
-    draw();
-    let skip = false;
-    const key = o.keys?.next().then((k) => {
-      if (k === CTRL_C || k === ESCAPE || k === 'q') skip = true;
-    });
-    void key;
-    for (;;) {
-      if (skip) {
-        io.out('Deep read skipped. Its prompts were dropped; your report stays.');
-        return;
-      }
-      if (clock() >= deadline) {
-        io.out(
-          'Deep read skipped: the report was not claimed within 10 minutes. Its prompts were dropped.',
-        );
-        return;
-      }
-      const status = await api.deepReadStatus(token).catch(() => undefined);
-      if (status?.bound) break;
-      await sleep(CLAIM_POLL_MS);
-      if (style.color) draw();
-    }
-  }
-  // The route answers 429 when its readers are busy; the client retries until the token expires.
-  for (;;) {
-    try {
-      await api.sendDeepRead(token, packet);
-      io.out(
-        `✓ Deep read sent: ${packet.prompts.length} prompts, read once by our model and then deleted.`,
-      );
-      return;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 429 && clock() < deadline) {
-        await sleep(CLAIM_POLL_MS);
-        continue;
-      }
-      io.out('The deep read did not go through. Its prompts were dropped; your report stays.');
-      return;
-    }
-  }
-}
-
-async function agentRun(
-  s: Scanned,
-  o: {
-    origin: Origin;
-    online: Online | undefined;
-    code: string | undefined;
-    timeZone: string;
-    platform: NodeJS.Platform;
-    dir: string;
-    root?: string;
-  },
-  io: Io,
-): Promise<number> {
-  // Quotes with links, paths, shell or wording aimed at agents never reach the agent.
-  const safe: Report = { ...s.report, quotes: s.report.quotes.filter((q) => agentSafe(q.text)) };
-  const hasPrompts = safe.metrics.userPrompts > 0;
-  const deepReadPrompts =
-    o.origin.isDefault && hasPrompts ? packetFor(s, '', o.code).prompts.length : 0;
-  const blocked = !hasPrompts
-    ? 'No prompts in this period, so there is nothing to upload.'
-    : o.online?.paused
-      ? 'Uploads are paused for a few minutes. Ask the user to try again later.'
-      : o.online?.token
-        ? undefined
-        : (o.online?.blocked ?? 'Uploads are not available right now.');
-  // The upload starts the CLI the way the agent just did: npx, the standalone build or a copy.
-  const program = invocation(io.program ?? thisProgram(), VERSION, o.platform);
-  const command = `${program} upload${o.code ? ` --code ${o.code}` : ''}`;
-  const text = renderAgentRun({
-    version: VERSION,
-    report: safe,
-    tools: s.tools,
-    days: s.days,
-    ...(o.online?.token?.account ? { who: o.online.token.account } : {}),
-    quotes: quoteViews(safe, o.timeZone),
-    deepReadPrompts,
-    command,
-    ...(blocked ? { blocked } : {}),
-    ...(o.origin.isDefault ? {} : { customHost: o.origin.host }),
-  });
-  io.out(text.length > AGENT_OUTPUT_LIMIT ? text.slice(0, AGENT_OUTPUT_LIMIT) : text);
-  if (blocked || !o.online?.token) return 0;
-  const payload = payloadFor(s, {
-    timeZone: o.timeZone,
-    platform: o.platform,
-    runMode: 'agent',
-    origin: o.origin,
-    consents: { researchAggregates: true, deepRead: false },
-    runToken: o.online.token.runToken,
-    report: safe,
-  });
-  writePending(o.dir, {
-    createdAt: io.now ?? Date.now(),
-    ...(o.code ? { code: o.code } : {}),
-    origin: o.origin.url.origin,
-    payload,
-    // The same place and period, so `upload --deep-read` reads exactly these sessions again.
-    scan: {
-      ...(o.root ? { root: o.root } : {}),
-      tools: s.tools.map((t) => t.tool),
-      days: s.days,
-      end: s.end,
-    },
-  });
-  return 0;
-}
-
-/** `agentgpa upload`: sends the payload that `--agent` showed, after the user said yes. */
-export async function runUpload(options: UploadOptions, io: Io): Promise<number> {
-  const env = io.env ?? process.env;
-  if (options.code !== undefined && !LINK_CODE.test(options.code)) {
-    io.err('--code takes the 8-character link code from /start, like K7Q3-PX9M.');
-    return 2;
-  }
-  let origin: Origin;
-  try {
-    origin = apiOrigin(env, io.officialApi);
-  } catch {
-    io.err('AGENTGPA_API_URL must be an https:// origin (or http://localhost while developing).');
-    return 2;
-  }
-  const dir = configDir(env);
-  const config = loadConfig(dir);
-  const now = io.now ?? Date.now();
-  const pending = readPending(dir, options.code, now);
-  if (!pending) {
-    io.out(
-      'No report is waiting to upload. Run the --agent command again: a waiting report expires after 30 minutes.',
+  const { api, token } = online;
+  if (!hasPrompts) {
+    return stop(
+      `No prompts in the last ${days} days, so there is nothing to send. Make a new code on ${origin.host}/start after your next session with an agent.`,
+      0,
     );
-    return 1;
   }
-  // A waiting report goes to the server it was prepared for and nowhere else: the upload needs
-  // no AGENTGPA_API_URL of its own, and one that names another server is refused.
-  if (pending.origin) {
-    let prepared: Origin;
-    try {
-      prepared = apiOrigin({ AGENTGPA_API_URL: pending.origin }, io.officialApi);
-    } catch {
-      removePending(dir, options.code);
-      io.out('The waiting report is broken, so it was dropped. Run the --agent command again.');
-      return 1;
-    }
-    if (env.AGENTGPA_API_URL && prepared.url.origin !== origin.url.origin) {
-      io.out(
-        `This report was prepared for ${prepared.host}, not ${origin.host}, so it was not sent. Run the --agent command again.`,
-      );
-      return 1;
-    }
-    origin = prepared;
-  }
-  const count = pending.payload.quotes.length;
-  const drop = (options.dropQuotes ?? '')
-    .split(',')
-    .map((x) => Number(x.trim()))
-    .filter((n) => Number.isInteger(n) && n >= 1 && n <= count);
-  const wantsDeepRead = options.deepRead === true && origin.isDefault;
-  const payload = PayloadSchema.parse({
-    ...pending.payload,
-    quotes: pending.payload.quotes.filter((_, i) => !drop.includes(i + 1)),
-    consents: { researchAggregates: options.research !== false, deepRead: wantsDeepRead },
+  // The deep read goes only to agentgpa.dev, whatever the code said.
+  const consents: RunConsents = {
+    researchAggregates: token.consents.researchAggregates,
+    deepRead: token.consents.deepRead && origin.isDefault,
+  };
+  // Quotes with links, paths, shell or wording aimed at agents stay out of an agent's run.
+  const sent: Report = options.agent
+    ? { ...report, quotes: report.quotes.filter((q) => agentSafe(q.text)) }
+    : report;
+  const payload = payloadFor(scanned, {
+    timeZone,
+    platform,
+    runMode: options.agent ? 'agent' : 'terminal',
+    origin,
+    consents,
+    runToken: token.runToken,
+    report: sent,
   });
-  const { runToken } = payload;
-  if (!runToken) {
-    io.out(
-      'This report has no run token, so it cannot be uploaded. Run the --agent command again.',
+  if (gzipSync(JSON.stringify(payload)).length > MAX_UPLOAD_BYTES) {
+    return stop(
+      'This report is larger than the server takes (1 MB gzipped). Make a new code and run it with --since 30d.',
+      1,
     );
-    return 1;
   }
-  const api = createApi(
-    createNet(origin, io.fetch ?? fetch),
-    io.sleep ? { sleep: io.sleep } : {},
-    io.powWorkers,
-  );
+  const sendStarted = clock();
   let accepted: Awaited<ReturnType<Api['upload']>>;
   try {
-    accepted = await api.upload(payload, runToken);
+    accepted = await api.upload(payload, token.runToken);
   } catch (error) {
     const why =
       error instanceof ApiError
         ? `the server answered ${error.status}`
         : 'the server could not be reached';
-    io.out(`The upload did not go through: ${why}. Try the same command again in a few minutes.`);
-    return 1;
-  }
-  removePending(dir, options.code);
-  const kept = pending.payload.quotes.map((_, i) => i + 1).filter((n) => !drop.includes(n));
-  const page = reportUrl(accepted.reportUrl ?? accepted.claimUrl ?? '', origin);
-  const year = academicYearOf(pending.scan.end, pending.payload.client.tz);
-  io.out(
-    renderUploaded({
-      version: VERSION,
-      kept,
-      deepRead: wantsDeepRead && accepted.deepReadToken !== undefined,
-      research: payload.consents.researchAggregates,
-      host: origin.host,
-      year,
-      linked: options.code !== undefined,
-      ...(page ? { page } : {}),
-    }),
-  );
-  if (wantsDeepRead && accepted.deepReadToken && options.code) {
-    // The packet is built again in memory from the same period; it was never written.
-    const scanned = await read(
-      {
-        ...(pending.scan.root ? { root: pending.scan.root } : {}),
-        tools: pending.scan.tools,
-        days: pending.scan.days,
-        end: pending.scan.end,
-        installId: config.installId,
-        code: options.code,
-        timeZone: pending.payload.client.tz,
-      },
-      io,
-      env,
+    return stop(
+      `The report did not go through: ${why}. Run the same command again in a few minutes.`,
+      1,
     );
-    await deepRead(
+  }
+  const sentSeconds = (clock() - sendStarted) / 1000;
+  let deepReadSent = false;
+  if (consents.deepRead && accepted.deepReadToken) {
+    deepReadSent = await sendDeepRead(
       api,
       accepted.deepReadToken,
       packetFor(scanned, config.installId, options.code),
-      {
-        linked: true,
-        keys: null,
-        style: { color: false, truecolor: false },
-        io,
-      },
+      io,
     );
   }
+  const page = reportUrl(accepted.reportUrl, origin) ?? reportUrl('/start', origin);
+  if (!page) return stop(`Sent. Your report is ready at ${origin.host}/start.`, 0);
+  const done = {
+    version: VERSION,
+    handle: token.account?.handle,
+    tools: scanned.tools,
+    sessions: report.metrics.sessions,
+    days,
+    readSeconds,
+    sentSeconds,
+    quotes: payload.quotes.length,
+    consents,
+    deepReadSent,
+    page,
+    opened: false,
+  };
+  if (options.agent) {
+    const text = renderAgentRun({
+      ...done,
+      ...(origin.isDefault ? {} : { customHost: origin.host }),
+    });
+    io.out(text.length > AGENT_OUTPUT_LIMIT ? text.slice(0, AGENT_OUTPUT_LIMIT) : text);
+    return 0;
+  }
+  const opened = (io.open ?? ((u) => openInBrowser(u, env, platform)))(page);
+  say(renderRunDone({ ...done, opened }, style));
   return 0;
-}
-
-function academicYearOf(end: number, timeZone: string): string {
-  const t = localClock(timeZone)(end);
-  const start = t.month >= 8 ? t.year : t.year - 1;
-  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
 }

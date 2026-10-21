@@ -4,15 +4,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 
-// ~/.agentgpa/config.json: the install id (a random id for this machine) and the telemetry
-// choice, once it is made. The folder is 0700 and the file 0600; nothing else is ever written
-// here except the pending payload of the agent flow.
+// ~/.agentgpa/config.json: the install id, a random id for this machine. The folder is 0700 and
+// the file 0600, and nothing else is ever written here.
 
 const Config = z.looseObject({
   version: z.literal(1),
   installId: z.uuid(),
-  /** Opt-in usage counts: unset until asked, then the answer. */
-  telemetry: z.boolean().optional(),
 });
 export type Config = z.infer<typeof Config>;
 

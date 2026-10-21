@@ -1,6 +1,6 @@
 # Grading
 
-How AgentGPA turns the sessions on your machine into a report card. All of it lives in `@agentgpa/core` and runs twice with the same code: in the CLI for the terminal preview, and on the AgentGPA server, which recomputes every number from the text-free event skeleton and ignores grades a client sends. The numbers are data in `packages/core/src/grading/config.ts`, `thresholds.ts`, `archetypes.ts` and `traits.ts`; this page explains them. Grading version: `v0` (the anchors are calibrated with beta data, and any change bumps the version).
+How AgentGPA turns the sessions on your machine into a report card. All of it lives in `@agentgpa/core`. The CLI uses it to measure your sessions and build the payload, and prints no grades; the AgentGPA server grades you with this same code, recomputing every number from the text-free event skeleton, and trusts no number a client sends. The numbers are data in `packages/core/src/grading/config.ts`, `thresholds.ts`, `archetypes.ts` and `traits.ts`; this page explains them. Grading version: `v0` (the anchors are calibrated with beta data, and any change bumps the version).
 
 ## The period and observed days
 

@@ -4,13 +4,13 @@ Rules for agents and people working on the AgentGPA CLI and `@agentgpa/core`. Th
 
 ## Privacy rules (non-negotiable)
 
-- Raw transcript text is only processed in memory. Never write it to disk, logs, test snapshots, fixtures, commits or chat output. The only prompt text on disk is the redacted quote candidates inside the payload file that `--dry-run` or the agent-mode pending step writes.
+- Raw transcript text is only processed in memory. Never write it to disk, logs, test snapshots, fixtures, commits or chat output. The only prompt text on disk is the redacted quote candidates inside the payload file that `--dry-run` writes.
 - The opt-in deep read sends a redacted sample of the user's own prompts to the AgentGPA server once. The CLI never stores, logs or caches that packet.
 - When you inspect real transcripts, look at structure only (keys, types, line kinds, counts). Never print prompt or response text.
 - Fixtures are produced only with `scripts/make-fixture.ts`, which replaces all text with synthetic words. Review every fixture before committing it.
-- Nothing is uploaded without the explicit consent step. `--offline` means zero network calls, including telemetry.
+- Nothing is uploaded without the user's yes on agentgpa.dev/start, which the link code carries: without a code the CLI reads nothing and sends nothing. `--offline`, `--dry-run`, `--json` and `--show-packet` mean zero network calls.
 - Nothing streams in the background: the CLI runs once per report. The event skeleton never contains prompt text, paths, file names or MCP server names.
-- In agent mode (the copy prompt) the agent only runs the CLI. Agent-mode output never contains prompt text beyond the redacted quote candidates.
+- A run prints no grades, quotes or findings, in the terminal or in agent mode: the results are only on the website. In agent mode (the copy prompt) the agent only runs the CLI, and its output never contains prompt text.
 - The CLI never calls an LLM and holds no API keys.
 - Secret detection reports counts by type only. Never send, store, log or commit secret values, fragments or hashes. Any in-memory dedupe hash is discarded after the scan.
 

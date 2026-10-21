@@ -2,7 +2,7 @@
 * @safakgungor
 
 # What can leave a machine, and how: redaction, the payload, the event log, the deep read
-# packet, quotes, secret detection, the API contract, the network layer, consent, upload and
+# packet, quotes, secret detection, the API contract, the network layer, the run that sends and
 # agent mode. Changes here rerun the leak suites.
 /packages/core/src/redaction.ts @safakgungor
 /packages/core/src/payload.ts @safakgungor
@@ -15,9 +15,8 @@
 /packages/core/src/api.ts @safakgungor
 /packages/cli/src/net.ts @safakgungor
 /packages/cli/src/api.ts @safakgungor
-/packages/cli/src/consent.ts @safakgungor
-/packages/cli/src/pending.ts @safakgungor
 /packages/cli/src/run.ts @safakgungor
+/packages/cli/src/screens.ts @safakgungor
 /packages/cli/src/agent.ts @safakgungor
 
 # What people install: the bundler, the standalone build, the package and the release workflow.

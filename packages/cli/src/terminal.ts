@@ -1,7 +1,6 @@
 // Drawing for the terminal screens: lines of styled segments, never wider than 80 columns, one
 // accent color, and readable without color, where highlights become [brackets] and labels end
-// in a colon. Transcript text never reaches these helpers except the redacted quote candidates
-// of the consent screen.
+// in a colon. Transcript text never reaches these helpers.
 
 export const WIDTH = 80;
 export const INNER = WIDTH - 4;

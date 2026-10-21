@@ -1,24 +1,27 @@
 # What leaves your machine
 
-Two things can leave your machine, and only after you say yes: the **payload** (your report, every time you upload) and the **deep read packet** (only when you turn the deep read on). A third, the **usage counts**, leaves only if you said yes to them once (below). Both are built by `@agentgpa/core` and checked against strict schemas (`packages/core/src/payload.ts` and `packet.ts`), so a field that is not listed on this page cannot be sent. The server parses every upload with the same schemas.
+Two things can leave your machine: the **payload** (what your report is made from, every run) and the **deep read packet** (only when you turn the deep read on). Both are built by `@agentgpa/core` and checked against strict schemas (`packages/core/src/payload.ts` and `packet.ts`), so a field that is not listed on this page cannot be sent. The server parses every upload with the same schemas.
 
-Before you answer, you can see both:
+You say yes on agentgpa.dev/start, before anything is read: the page shows what a run sends, lets you turn research aggregates off and the deep read on, and asks you to agree to the terms. Then it gives you a one-time link code, which carries those choices, and the command to run with it.
 
-- `agentgpa --dry-run` writes the payload to `agentgpa-payload.json` in the current folder and sends nothing. `agentgpa --json` prints it.
-- `agentgpa --show-packet` prints the deep read packet and sends nothing. On the consent screen, `s` does the same.
+The CLI prints no grades, quotes or findings, in your terminal or in your agent: your report is on the website. Before you say yes, or any time after, you can see exactly what would be sent, without a code and without any network call:
+
+- `agentgpa --dry-run` writes the payload to `agentgpa-payload.json` in the current folder. `agentgpa --json` prints it.
+- `agentgpa --show-packet` prints the deep read packet.
+- `agentgpa --offline` says what it found and what a run would send.
 
 ## When the CLI talks to the network
 
-Every request goes through `packages/cli/src/net.ts`, to one origin: `https://agentgpa.dev`, unless `AGENTGPA_API_URL` names another (any other origin makes the run report only and turns the deep read off). With `--offline`, `--dry-run`, `--json` or `--show-packet` the CLI makes no request at all. In agent mode the waiting report remembers the origin it was prepared for: `upload` sends it there without needing `AGENTGPA_API_URL` again, and refuses when `AGENTGPA_API_URL` names another origin.
+Only a run with a link code talks to the network. Without a code, the CLI reads nothing, sends nothing and points you to agentgpa.dev/start; with `--offline`, `--dry-run`, `--json` or `--show-packet` it makes no request at all. Every request goes through `packages/cli/src/net.ts`, to one origin: `https://agentgpa.dev`, unless `AGENTGPA_API_URL` names another (any other origin makes the run report only and turns the deep read off).
 
 | Request | When | What it sends |
 | --- | --- | --- |
 | `GET /api/cli/status` | At the start | The CLI version |
-| `POST /api/cli/runs` | At the start, before the scan | A random install id (from `~/.agentgpa/config.json`), the CLI version, the link code if you passed one, and the answer to a proof-of-work challenge |
-| `POST /api/cli/reports` | After you say yes | The payload, gzipped, with the run token in a header |
-| `GET /api/cli/deep-read/status` | Deep read on, while it waits for your claim | The deep read token |
-| `POST /api/cli/deep-read` | Deep read on, once the report is yours | The packet, gzipped |
-| `POST /api/cli/telemetry` | At the end of a run, only if you said yes to usage counts | The usage counts below |
+| `POST /api/cli/runs` | At the start, before the scan | A random install id (from `~/.agentgpa/config.json`), the CLI version, the link code and the answer to a proof-of-work challenge. The answer binds the run to your account and tells the CLI your choices from /start; each code starts one run |
+| `POST /api/cli/reports` | Right after the scan | The payload, gzipped, with the run token in a header |
+| `POST /api/cli/deep-read` | Right after the report, only when you turned the deep read on | The packet, gzipped |
+
+Then the CLI opens your report page in the browser (in agent mode, your agent tells you where it is), and the run is over.
 
 ## The payload
 
@@ -35,9 +38,9 @@ Every request goes through `packages/cli/src/net.ts`, to one origin: `https://ag
 | `counts` | Sessions, prompts, replies, tool calls, active days and active minutes |
 | `metrics` | Every number in `docs/grading.md`, per tool where it is graded per tool, and the counts per 30 observed days |
 | `secrets` | How many secrets were pasted or read by your agent, by type and tool. Never a value, a part of one or its hash |
-| `consents` | Your two choices: research aggregates (on unless you turn it off) and the deep read (off unless you turn it on). In agent mode, `upload --no-research` and `upload --deep-read` set them |
+| `consents` | Your two choices on agentgpa.dev/start, as the link code carried them: research aggregates (on unless you turn it off) and the deep read (off unless you turn it on). The server follows the choices it recorded with the code |
 | `distributions` | Prompts per hour of the day, per-day series (prompts, thanks, caps, night prompts, "absolutely right", apologies, replies), the top 5 models by share, and the top 5 tool names (MCP tools as `MCP`, never by server) |
-| `quotes` | Up to 5 quote candidates, only the ones you kept (see below) |
+| `quotes` | Up to 5 quote candidates, which stay private until you pick them (see below) |
 | `client` | Your system (`darwin`, `linux` or `win32`), whether it ran in a terminal or an agent, your time zone, whether the origin is the official one, and whether the sessions came from the tools' default locations or a folder given with `--root` (never the folder itself) |
 | `runToken` | The one-time token for this run (absent from `--dry-run` files, which can never rank) |
 | `skeleton` | The event log (below) |
@@ -57,13 +60,15 @@ The skeleton holds no text, no paths, no file names, no project names and no MCP
 
 ### Quotes
 
-A quote is your own prompt, shown to you before anything is sent: one you repeat most, one in all caps, the saltiest, and up to two cryptic ones. Each is at most 120 characters. Swears are masked as `[[bar:N]]` (N letters), which cards draw as a bar, so the word itself never leaves. A prompt with anything else to redact (a secret, a random-looking string, an id, an email, a phone number, an address, a home path, a project or account name) is never a quote, and neither is one with code. You can drop any quote on the consent screen, or with `--drop-quotes`. Each quote carries its kind, its local hour and weekday, the index of the prompt in the event log, so the server can check it against that prompt, and for the most repeated one how often it came up.
+A quote is your own prompt: one you repeat most, one in all caps, the saltiest, and up to two cryptic ones. Each is at most 120 characters. Swears are masked as `[[bar:N]]` (N letters), which cards draw as a bar, so the word itself never leaves. A prompt with anything else to redact (a secret, a random-looking string, an id, an email, a phone number, an address, a home path, a project or account name) is never a quote, and neither is one with code. Each quote carries its kind, its local hour and weekday, the index of the prompt in the event log, so the server can check it against that prompt, and for the most repeated one how often it came up.
+
+The candidates reach the server private. Nobody sees one, on your own cards either, until you pick it on your report page, and the ones you do not pick are deleted once you have picked, or after 30 days. `--dry-run` and `--json` show exactly which candidates a run would send.
 
 In agent mode, quotes with a link, a path, a shell construct or wording aimed at an agent are left out, since old sessions can hold text written to steer agents.
 
 ## The deep read packet
 
-Only when you turn the deep read on. It is built in memory, sent once after the report is yours, read once by the AgentGPA model and dropped. It is never written to disk, and `--show-packet` prints exactly what it would hold.
+Only when you turned the deep read on at agentgpa.dev/start. It is built in memory, sent once right after the report, read once by the AgentGPA model and dropped. It is never written to disk, and `--show-packet` prints exactly what it would hold.
 
 | Field | What it holds |
 | --- | --- |
@@ -73,20 +78,9 @@ Only when you turn the deep read on. It is built in memory, sent once after the 
 
 Never in the packet: the agent's replies, tool output, file contents, code blocks, pasted errors and logs, prompts over 2,000 characters, and prompts of fewer than three words.
 
-## Usage counts
-
-Off unless you say yes. The first time you run the CLI in a terminal against a server that takes them, it asks once; your answer is kept in `~/.agentgpa/config.json`, and you can change it there any time. It never asks, and nothing is sent, in agent mode, with `--yes`, or offline. The body is checked against a strict schema (`TelemetrySchema` in `packages/core/src/api.ts`), so nothing else can ride along:
-
-| Field | What it holds |
-| --- | --- |
-| `run` | A random id for this run, made in memory and never stored |
-| `cliVersion` | The CLI version |
-| `events` | How many times each of these happened in this run: `cli_run`, `cli_preview_shown` (the report card was shown) and `cli_consent_given` (you said yes to an upload) |
-
-Never in it: your install id, sessions, prompts, paths, project names, grades or anything from the payload.
-
 ## What the CLI writes on your machine
 
-- `~/.agentgpa/config.json` (folder 0700, file 0600): a random install id, and your answer about usage counts once you give one.
-- `~/.agentgpa/pending/` (0700 and 0600): in agent mode only, the payload the agent showed you, waiting for `upload`. It is deleted after the upload, after 30 minutes, and when the next scan starts.
+- `~/.agentgpa/config.json` (folder 0700, file 0600): a random install id.
 - `agentgpa-payload.json` in the current folder, with `--dry-run` only (0600).
+
+Nothing else: no cache, no log and no waiting report.

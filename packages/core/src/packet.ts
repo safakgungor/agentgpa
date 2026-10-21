@@ -8,8 +8,9 @@ import { type Session, TOOL_FLAGS, type Tool, type ToolCategory } from './types.
 import { ToolSchema } from './wire.ts';
 
 // The deep read packet: a redacted sample of the prompts the user typed, and text-free work
-// signals per session. It is built in memory, sent once after the user opts in and claims the
-// report, read once by our model and dropped. It is never written to disk.
+// signals per session. It is built in memory, sent once right after the report when the user
+// turned the deep read on at /start, read once by our model and dropped. It is never written to
+// disk.
 
 export const PACKET_SCHEMA_VERSION = 1;
 

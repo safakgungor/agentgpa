@@ -21,7 +21,6 @@ async function run(args: Parameters<typeof runScan>[0]) {
     now: NOW,
     env: { AGENTGPA_CONFIG_DIR: CONFIG },
     cwd: SCRATCH,
-    keys: null,
   });
   return { code, out: out.join('\n'), err: err.join('\n') };
 }
@@ -46,7 +45,7 @@ describe('agentgpa --dry-run --debug', () => {
 
   it('prints no text from the sessions', async () => {
     const root = await fixtureHome();
-    const { out } = await run({ debug: true, root });
+    const { out } = await run({ debug: true, offline: true, root });
     const texts = [parseClaude(), parseCodex(), parseCursor()]
       .flatMap((r) => r.sessions.flatMap((s) => s.events))
       .flatMap((e) => (e.kind === 'user_prompt' || e.kind === 'assistant_text' ? [e.text] : []))
@@ -58,7 +57,7 @@ describe('agentgpa --dry-run --debug', () => {
 
   it('reads only the tools asked for, and checks its flags', async () => {
     const root = await fixtureHome();
-    const { out } = await run({ debug: true, root, tools: 'codex' });
+    const { out } = await run({ debug: true, offline: true, root, tools: 'codex' });
     expect(out).toContain('codex: found');
     expect(out).not.toContain('claude-code');
     expect((await run({ root, since: '45d' })).code).toBe(2);
@@ -67,7 +66,13 @@ describe('agentgpa --dry-run --debug', () => {
 
   it('filters the period by event time', async () => {
     const root = await fixtureHome();
-    const { out } = await run({ debug: true, root, since: '7d', tools: 'claude-code' });
+    const { out } = await run({
+      debug: true,
+      offline: true,
+      root,
+      since: '7d',
+      tools: 'claude-code',
+    });
     expect(out).toMatch(/last 7 days: 0 sessions/);
   });
 });
@@ -85,7 +90,6 @@ describe('agentgpa --dry-run', () => {
         now: Date.UTC(2027, 9, 20),
         env: { AGENTGPA_CONFIG_DIR: CONFIG },
         cwd: dir,
-        keys: null,
       },
     );
     expect(code).toBe(0);
@@ -111,7 +115,6 @@ describe('agentgpa --dry-run', () => {
         env: { AGENTGPA_CONFIG_DIR: CONFIG },
         home,
         cwd: dir,
-        keys: null,
       },
     );
     expect(code).toBe(0);

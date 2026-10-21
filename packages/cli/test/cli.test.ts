@@ -36,11 +36,17 @@ describe('agentgpa', () => {
     expect(await run(['--help'])).toContain('Usage: agentgpa');
   });
 
-  it('reads the sessions when run without arguments, and says when there are none', async () => {
+  it('points to /start when run without a code, and reads nothing', async () => {
     const output = await run([]);
-    expect(output).toContain('Claude Code not found');
-    expect(output).toContain('so nothing to grade.');
-    expect(output).toContain('Nothing has left this machine.');
+    expect(output).toContain('START ON THE WEBSITE');
+    expect(output).toContain('agentgpa.dev/start');
+    expect(output).toContain('NOTHING WAS READ');
+  });
+
+  it('says what it found with --offline, and that nothing was sent', async () => {
+    const output = await run(['--offline']);
+    expect(output).toContain('Found no agent sessions');
+    expect(output).toContain('NOTHING WAS SENT');
   });
 
   it('prints its version and the payload schema', async () => {
@@ -49,8 +55,19 @@ describe('agentgpa', () => {
 
   it('lists the scan flags', async () => {
     const help = await run(['--help']);
-    for (const flag of ['--dry-run', '--debug', '--since', '--tools', '--root'])
+    for (const flag of [
+      '--code',
+      '--agent',
+      '--dry-run',
+      '--debug',
+      '--since',
+      '--tools',
+      '--root',
+    ])
       expect(help).toContain(flag);
+    // The run asks nothing: the yes is given on agentgpa.dev/start.
+    for (const gone of ['--yes', '--deep-read', '--details', 'upload'])
+      expect(help).not.toContain(gone);
   });
 });
 

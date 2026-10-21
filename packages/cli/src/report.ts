@@ -1,4 +1,4 @@
-import { COURSE_NAMES, COURSES, type Report, safeLabel } from '@agentgpa/core';
+import { safeLabel } from '@agentgpa/core';
 import type { ToolScan } from './scan.ts';
 
 // The --debug report: counts, kinds and timings only. It never prints transcript text, paths
@@ -95,19 +95,4 @@ export function debugReport(scans: ToolScan[], options: ReportOptions): string {
   }
   lines.push(`scan: ${n(Math.round(options.scanMs))} ms`);
   return lines.join('\n');
-}
-
-/** Grades, archetype, activities and secret counts in one block; numbers and letters only. */
-export function gradesSummary(report: Report): string {
-  const g = report.grades;
-  const courses = COURSES.map(
-    (id) => `${COURSE_NAMES[id]} ${g.courses[id].letter} (${g.courses[id].score})`,
-  ).join(', ');
-  const s = report.device.secrets;
-  return [
-    `grades: ${g.gpa === undefined ? 'Incomplete' : `GPA ${g.gpa.toFixed(2)}`} · ${courses}`,
-    `  archetype: ${report.archetype.name}; activities: ${report.activities.map((a) => a.name).join(', ') || 'none'}`,
-    `  secrets: ${s.pasted} pasted, ${s.exposedViaTools} exposed through tools; estimated cost $${Math.round(report.metrics.estimatedCostUsd).toLocaleString('en-US')} (${report.metrics.unpricedCalls.toLocaleString('en-US')} calls without a list price)`,
-    `  preview lines: ${report.previewLines.map((l) => l.id).join(', ')}; prompt language: ${report.device.promptLanguage}`,
-  ].join('\n');
 }

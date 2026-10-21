@@ -212,6 +212,7 @@ describe('the API client', () => {
         runToken: 'run-token-aaaaaaaaaaaaaaaa',
         expiresAt: new Date(Date.now() + 1_800_000).toISOString(),
         account: { name: 'Mira', handle: 'mira-dev' },
+        consents: { researchAggregates: true, deepRead: false },
       });
     });
     let uploads = 0;
@@ -220,16 +221,18 @@ describe('the API client', () => {
       expect(req.headers['x-agentgpa-run-token']).toBe('run-token-aaaaaaaaaaaaaaaa');
       expect(JSON.parse(gunzipSync(body).toString())).toEqual({ schemaVersion: 1 });
       if (uploads === 1) return json(res, 503, {}, { 'retry-after': '0' });
-      json(res, 202, { claimUrl: `${base}/claim/7KQ2M9XA4P` });
+      json(res, 202, { reportUrl: `${base}/start` });
     });
     const api = createApi(net(), { sleep: async () => {} });
     const token = await api.runToken({
       installId: '7f0c0a3e-1d2b-4c5d-8e9f-0a1b2c3d4e5f',
       cliVersion: '0.1.0',
+      code: 'K7Q3-PX9M',
     });
     expect(token.account).toEqual({ name: 'Mira', handle: 'mira-dev' });
+    expect(token.consents).toEqual({ researchAggregates: true, deepRead: false });
     const accepted = await api.upload({ schemaVersion: 1 } as never, token.runToken);
-    expect(accepted.claimUrl).toBe(`${base}/claim/7KQ2M9XA4P`);
+    expect(accepted.reportUrl).toBe(`${base}/start`);
     expect(uploads).toBe(2);
   });
 

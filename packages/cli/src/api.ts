@@ -2,7 +2,6 @@ import {
   type CliStatus,
   CliStatusSchema,
   DeepReadDoneSchema,
-  DeepReadStatusSchema,
   type Packet,
   type Payload,
   type ReportAccepted,
@@ -11,9 +10,6 @@ import {
   type RunRequest,
   RunRequestSchema,
   type RunToken,
-  type Telemetry,
-  TelemetryAcceptedSchema,
-  TelemetrySchema,
 } from '@agentgpa/core';
 import { type Answer, type Net, NetError, type RetryOptions, withRetries } from './net.ts';
 import { solvePow } from './pow.ts';
@@ -24,16 +20,19 @@ import { solvePow } from './pow.ts';
 /** The server answered, but not with a yes. */
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number) {
+  /** From `Retry-After`: the server asked for another try after this long. */
+  readonly retryAfterMs: number | undefined;
+  constructor(status: number, retryAfterMs?: number) {
     super(`server answered ${status}`);
     this.name = 'ApiError';
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
 function ok<T>(answer: Answer<T>): T {
   if (answer.data === undefined || answer.status < 200 || answer.status >= 300)
-    throw new ApiError(answer.status);
+    throw new ApiError(answer.status, answer.retryAfterMs);
   return answer.data;
 }
 
@@ -44,10 +43,7 @@ export interface Api {
   /** A run token, bought with a solved proof-of-work challenge. */
   runToken(request: Omit<RunRequest, 'challenge' | 'nonce'>): Promise<RunToken>;
   upload(payload: Payload, runToken: string): Promise<ReportAccepted>;
-  deepReadStatus(token: string): Promise<{ bound: boolean; graded: boolean }>;
   sendDeepRead(token: string, packet: Packet): Promise<void>;
-  /** The run's opt-in usage counts: one try, no retries, and a failure changes nothing. */
-  telemetry(body: Telemetry): Promise<void>;
 }
 
 export function createApi(net: Net, retry: RetryOptions = {}, workers?: number): Api {
@@ -107,17 +103,6 @@ export function createApi(net: Net, retry: RetryOptions = {}, workers?: number):
       return ok(answer);
     },
 
-    async deepReadStatus(token) {
-      const answer = await net.request({
-        method: 'GET',
-        path: '/api/cli/deep-read/status',
-        schema: DeepReadStatusSchema,
-        headers: { 'x-agentgpa-deep-read-token': token },
-        timeoutMs: 10_000,
-      });
-      return ok(answer);
-    },
-
     async sendDeepRead(token, packet) {
       const answer = await withRetries(
         () =>
@@ -133,20 +118,6 @@ export function createApi(net: Net, retry: RetryOptions = {}, workers?: number):
         retry,
       );
       ok(answer);
-    },
-
-    async telemetry(body) {
-      try {
-        await net.request({
-          method: 'POST',
-          path: '/api/cli/telemetry',
-          schema: TelemetryAcceptedSchema,
-          body: TelemetrySchema.parse(body),
-          timeoutMs: 3000,
-        });
-      } catch {
-        // Usage counts never hold up or fail a run.
-      }
     },
   };
 }
