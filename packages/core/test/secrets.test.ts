@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findSecrets, SecretScanner, type SecretType } from '../src/index.ts';
+import { githubToken } from './corpus.ts';
 
 // The corpus is generated when the test runs, so no secret-shaped string sits in the source
 // (secret scanners read this repository too). Every value is random and fake.
@@ -21,7 +22,7 @@ function corpus(): [SecretType, string][] {
   return [
     ['aws', join('AK', 'IA', pick(BASE32, 16))],
     ['aws', join('AS', 'IA', pick(BASE32, 16))],
-    ['github', join('gh', 'p_', pick(ALNUM, 36))],
+    ['github', githubToken(pick(ALNUM, 30))],
     ['github', join('github', '_pat_', pick(`${ALNUM}_`, 82))],
     ['anthropic', join('sk-', 'ant-', 'api03-', pick(URLSAFE, 93))],
     ['openai', join('sk-', 'proj-', pick(URLSAFE, 60))],
@@ -95,6 +96,33 @@ describe('secret detection', () => {
     const hits = clean.filter((text) => findSecrets(text).length > 0);
     expect(hits.length / clean.length).toBeLessThan(0.01);
     expect(hits).toEqual([]);
+  });
+
+  it('skips keys that unlock nothing: local demo keys, anon keys and unissued GitHub tokens', () => {
+    const base64url = (text: string) =>
+      btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const jwt = (claims: Record<string, string>) =>
+      join(
+        base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' })),
+        '.',
+        base64url(JSON.stringify(claims)),
+        '.',
+        pick(URLSAFE, 43),
+      );
+    const types = (text: string) => findSecrets(text).map((f) => f.type);
+    // Supabase's local stack gives everyone the same demo keys, service role included.
+    expect(types(jwt({ iss: 'supabase-demo', role: 'service_role' }))).toEqual([]);
+    // An anon key is public by design; a service role key or a user's session is a secret.
+    expect(types(jwt({ iss: 'supabase', ref: pick(ALNUM, 20), role: 'anon' }))).toEqual([]);
+    expect(types(jwt({ iss: 'supabase', ref: pick(ALNUM, 20), role: 'service_role' }))).toEqual([
+      'jwt',
+    ]);
+    expect(types(jwt({ sub: pick(ALNUM, 12), role: 'authenticated' }))).toEqual(['jwt']);
+    // A GitHub token counts only when its checksum holds, as every issued one does.
+    const token = githubToken(pick(ALNUM, 30));
+    const broken = join(token.slice(0, -1), token.endsWith('A') ? 'B' : 'A');
+    expect(types(`GH=${token}`)).toEqual(['github']);
+    expect(types(`GH=${broken}`)).toEqual([]);
   });
 
   it('counts distinct secrets, pasted and exposed, by type and tool, and never the values', () => {

@@ -1,8 +1,9 @@
 import type { Tool } from './types.ts';
 
 // Secret detection: provider-specific patterns and private key blocks only, no generic
-// entropy, and documentation examples, templates and local database URLs are skipped, to keep
-// false positives low. Only counts by type leave this module. Values are
+// entropy, and what unlocks nothing is skipped to keep false positives low: documentation
+// examples, templates, local database URLs, Supabase's local demo keys and public anon keys,
+// and GitHub tokens whose checksum fails. Only counts by type leave this module. Values are
 // never stored: a secret is remembered as a hash for deduplication, and the scanner (with
 // its hashes) is dropped when the scan ends.
 
@@ -140,11 +141,77 @@ const LOCAL_DB = /@(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|host\.docker\.in
 const TEMPLATE_CREDENTIALS =
   /:\/\/(?:user|username|postgres|root|admin|test|guest)?:(?:password|pass|passwd|secret|postgres|root|admin|test|guest|changeme)@/i;
 
-function isPlaceholder(type: SecretType, value: string): boolean {
+const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+function crc32(text: string): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < text.length; i++) {
+    let c = (crc ^ text.charCodeAt(i)) & 0xff;
+    for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1;
+    crc = (crc >>> 8) ^ c;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * The six characters a classic GitHub token (`ghp_` and its kin) ends with: the CRC32 of its 30
+ * random characters in base62. GitHub issues every token with it, so one whose checksum fails
+ * was typed or generated, not issued. Exported for tests that make valid-looking fakes.
+ */
+export function githubChecksum(body: string): string {
+  let n = crc32(body);
+  let out = '';
+  do {
+    out = (BASE62[n % 62] as string) + out;
+    n = Math.floor(n / 62);
+  } while (n > 0);
+  return out.padStart(6, '0');
+}
+
+const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/**
+ * The claims of a JWT, when its middle part is base64url JSON. Bytes become characters one by
+ * one, which keeps ASCII claims such as `iss` and `role` exact (core has no TextDecoder).
+ */
+function jwtClaims(token: string): Record<string, unknown> | undefined {
+  const part = token.split('.')[1] ?? '';
+  let bits = 0;
+  let value = 0;
+  let text = '';
+  for (const ch of part) {
+    const digit = BASE64URL.indexOf(ch);
+    if (digit < 0) return undefined;
+    value = (value << 6) | digit;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      text += String.fromCharCode((value >> bits) & 0xff);
+    }
+  }
+  try {
+    const claims: unknown = JSON.parse(text);
+    return claims && typeof claims === 'object' ? (claims as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Matches that unlock nothing: examples, templates, local and public keys, unissued tokens. */
+function notASecret(type: SecretType, value: string): boolean {
   if (PLACEHOLDER.test(value)) return true;
   if (type !== 'private_key' && new Set(value.slice(Math.min(8, value.length >> 1))).size <= 4)
     return true;
-  return type === 'db_url' && (LOCAL_DB.test(value) || TEMPLATE_CREDENTIALS.test(value));
+  if (type === 'db_url') return LOCAL_DB.test(value) || TEMPLATE_CREDENTIALS.test(value);
+  if (type === 'jwt') {
+    // Supabase's local stack ships the same demo keys to everyone, and an anon key is made to
+    // sit in web pages: neither grants anything a visitor does not have.
+    const claims = jwtClaims(value);
+    return claims?.iss === 'supabase-demo' || claims?.role === 'anon';
+  }
+  if (type === 'github' && /^gh[pousr]_/.test(value))
+    return githubChecksum(value.slice(4, 34)) !== value.slice(34, 40);
+  return false;
 }
 
 /** The types of secrets in a text. Exported for tests; production code uses `SecretScanner`. */
@@ -154,7 +221,7 @@ export function findSecrets(text: string): { type: SecretType; key: string }[] {
   for (const m of text.matchAll(COMBINED)) {
     const groups = m.groups ?? {};
     const type = SECRET_TYPES.find((t) => groups[t] !== undefined);
-    if (type && !isPlaceholder(type, m[0])) found.push({ type, key: hash(m[0]) });
+    if (type && !notASecret(type, m[0])) found.push({ type, key: hash(m[0]) });
   }
   return found;
 }

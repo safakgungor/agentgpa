@@ -1,4 +1,5 @@
 import type { SecretType } from '../src/index.ts';
+import { githubChecksum } from '../src/secrets.ts';
 
 // Fake secrets, generated when the tests run so no secret-shaped string sits in the source
 // (secret scanners read this repository too). Every value is random and fake.
@@ -16,6 +17,8 @@ const BASE32 = `${UPPER}234567`;
 const ALNUM = `${UPPER}abcdefghijklmnopqrstuvwxyz0123456789`;
 const URLSAFE = `${ALNUM}_-`;
 export const join = (...parts: string[]): string => parts.join('');
+/** A fake classic GitHub token that passes the checksum, the way issued tokens do. */
+export const githubToken = (body: string): string => join('gh', 'p_', body, githubChecksum(body));
 
 /** One sample of each kind the detector knows, from a seeded generator. */
 export function secretSamples(seed = 42): [SecretType, string][] {
@@ -25,7 +28,7 @@ export function secretSamples(seed = 42): [SecretType, string][] {
   return [
     ['aws', join('AK', 'IA', pick(BASE32, 16))],
     ['aws', join('AS', 'IA', pick(BASE32, 16))],
-    ['github', join('gh', 'p_', pick(ALNUM, 36))],
+    ['github', githubToken(pick(ALNUM, 30))],
     ['github', join('github', '_pat_', pick(`${ALNUM}_`, 82))],
     ['anthropic', join('sk-', 'ant-', 'api03-', pick(URLSAFE, 93))],
     ['openai', join('sk-', 'proj-', pick(URLSAFE, 60))],

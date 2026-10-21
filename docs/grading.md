@@ -87,7 +87,7 @@ Fewer than 20 prompts or fewer than 3 active days: no GPA. The card still shows 
 
 - Provider patterns only, no generic entropy rule: AWS keys, GitHub tokens, OpenAI and Anthropic keys, live Stripe keys, Google Cloud keys, Slack tokens, private key blocks, JSON web tokens, database URLs with a password, and other providers such as npm and Hugging Face.
 - A keyword check decides whether a text needs scanning, then one combined pattern runs.
-- Not counted: placeholders and documentation examples, Stripe test keys, database URLs on your own machine and template credentials.
+- Not counted: placeholders and documentation examples, Stripe test keys, database URLs on your own machine and template credentials, Supabase's local demo keys and public anon keys (JSON web tokens whose issuer is `supabase-demo` or whose role is `anon`), and GitHub tokens whose checksum fails, since GitHub issues every token with one.
 - **Pasted** secrets are in your prompts. **Exposed** secrets are in tool output that entered the agent's context (the first 64 KB of each output), and were not pasted too. Web pages and MCP results are skipped: their example keys are not yours.
 - Each distinct secret counts once, for the tool that saw it first.
 - Only counts by type leave the scan. Values stay in memory, and the in-memory hashes used to count each secret once are dropped when the scan ends.
