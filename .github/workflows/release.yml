@@ -84,7 +84,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/package"
           npm pack --pack-destination "$RUNNER_TEMP/package"
           cd "$RUNNER_TEMP/package" && sha256sum agentgpa-*.tgz | tee package.sha256
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-${{ matrix.copy }}
           path: ${{ runner.temp }}/package/
@@ -127,7 +127,7 @@ jobs:
           binary="$(ls dist/agentgpa-* | grep -v '\.sha256$')"
           "./$binary" --version
           AGENTGPA_CONFIG_DIR="$RUNNER_TEMP/config" "./$binary" --offline --root ../../fixtures/home
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: standalone-${{ matrix.build }}
           path: packages/cli/dist/agentgpa-*
