@@ -3,6 +3,8 @@ name: Release
 # Publishes agentgpa from a signed tag (vX.Y.Z) once the maintainer approves the `release`
 # environment: the npm package through trusted publishing (OIDC, so no npm token exists anywhere)
 # with provenance, and the standalone builds with their SHA-256 sums and build attestations.
+# While this repository is private, npm makes no provenance and GitHub no attestations, and asking
+# for either fails the release, so both wait until it is public.
 # Everything is built twice and must come out byte for byte the same, so anyone can rebuild a
 # release and compare. A manual run builds and checks everything and publishes nothing.
 # No caches: a release never builds from something an earlier run left behind.
@@ -170,21 +172,37 @@ jobs:
             grep -q "^$built " SHA256SUMS || { echo "a standalone build changed after it was built: $f"; exit 1; }
           done
           test "$(wc -l < SHA256SUMS)" -eq 5
+      - name: Read the repository's visibility
+        id: repo
+        env:
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          case "$PRIVATE" in
+            true | false) echo "private=$PRIVATE" >> "$GITHUB_OUTPUT" ;;
+            *) echo "unknown repository visibility: $PRIVATE"; exit 1 ;;
+          esac
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        if: steps.repo.outputs.private == 'false'
         with:
           subject-checksums: ${{ runner.temp }}/release/SHA256SUMS
-      # Trusted publishing needs npm 11.5.1 or newer; provenance comes with it.
+      # Trusted publishing needs npm 11.5.1 or newer; provenance comes with it once this
+      # repository is public.
       - name: Publish to npm
+        env:
+          PRIVATE: ${{ steps.repo.outputs.private }}
         run: |
           node -e "const [a,b,c]=process.argv[1].split('.').map(Number); if (a<11||(a===11&&(b<5||(b===5&&c<1)))) { console.error('npm '+process.argv[1]+' is too old for trusted publishing'); process.exit(1) }" "$(npm --version)"
           if [ "$(npm view "agentgpa@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
             echo "agentgpa@$VERSION is already on npm"
           else
-            npm publish "$RUNNER_TEMP/release/agentgpa-$VERSION.tgz" --access public --provenance
+            provenance=--provenance
+            if [ "$PRIVATE" = true ]; then provenance=; fi
+            npm publish "$RUNNER_TEMP/release/agentgpa-$VERSION.tgz" --access public $provenance
           fi
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          PRIVATE: ${{ steps.repo.outputs.private }}
         run: |
           cd "$RUNNER_TEMP/release"
           {
@@ -194,7 +212,9 @@ jobs:
             echo
             echo '```'
             echo "sha256sum -c SHA256SUMS --ignore-missing"
-            echo "gh attestation verify agentgpa-linux-x64 --repo $GITHUB_REPOSITORY"
+            if [ "$PRIVATE" = false ]; then
+              echo "gh attestation verify agentgpa-linux-x64 --repo $GITHUB_REPOSITORY"
+            fi
             echo "npm audit signatures"
             echo '```'
             echo
