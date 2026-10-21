@@ -1,0 +1,14 @@
+{
+  "name": "@agentgpa/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure grading, metrics and payload logic shared by the AgentGPA CLI and server. No fs, no network.",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}

@@ -1,0 +1,186 @@
+import type { Tool, ToolCategory } from './types.ts';
+
+// Built-in tool names per agent tool and their categories. Names that are not listed
+// become "Other"; MCP tools become "MCP" and never keep their server or tool name.
+
+const CLAUDE_CODE: Record<string, ToolCategory> = {
+  Bash: 'Bash',
+  BashOutput: 'Bash',
+  KillBash: 'Bash',
+  KillShell: 'Bash',
+  Monitor: 'Bash',
+  TaskOutput: 'Bash',
+  TaskStop: 'Bash',
+  Edit: 'Edit',
+  MultiEdit: 'Edit',
+  Write: 'Write',
+  Read: 'Read',
+  NotebookEdit: 'Notebook',
+  NotebookRead: 'Notebook',
+  Grep: 'Search',
+  Glob: 'Search',
+  LS: 'Search',
+  ToolSearch: 'Search',
+  WebFetch: 'Web',
+  WebSearch: 'Web',
+  Task: 'Task',
+  Agent: 'Task',
+  Workflow: 'Task',
+  SendMessage: 'Task',
+  TodoWrite: 'Todo',
+  TodoRead: 'Todo',
+  TaskCreate: 'Todo',
+  TaskUpdate: 'Todo',
+  TaskList: 'Todo',
+  TaskGet: 'Todo',
+  EnterPlanMode: 'Other',
+  ExitPlanMode: 'Other',
+  AskUserQuestion: 'Other',
+  Skill: 'Other',
+  SlashCommand: 'Other',
+  ScheduleWakeup: 'Other',
+  CronCreate: 'Other',
+  CronDelete: 'Other',
+  CronList: 'Other',
+  PushNotification: 'Other',
+  ReadNotifications: 'Other',
+  SendUserFile: 'Other',
+  Artifact: 'Other',
+  ReportFindings: 'Other',
+  EnterWorktree: 'Other',
+  ExitWorktree: 'Other',
+};
+
+const CODEX: Record<string, ToolCategory> = {
+  exec_command: 'Bash',
+  exec: 'Bash',
+  shell: 'Bash',
+  local_shell: 'Bash',
+  local_shell_call: 'Bash',
+  'container.exec': 'Bash',
+  write_stdin: 'Bash',
+  apply_patch: 'Edit',
+  view_image: 'Read',
+  read_file: 'Read',
+  list_dir: 'Search',
+  grep_files: 'Search',
+  web_search: 'Web',
+  update_plan: 'Todo',
+  spawn_agent: 'Task',
+  send_input: 'Task',
+  wait: 'Task',
+  close_agent: 'Task',
+  run: 'Other',
+};
+
+const CURSOR: Record<string, ToolCategory> = {
+  run_terminal_cmd: 'Bash',
+  run_terminal_command: 'Bash',
+  Shell: 'Bash',
+  edit_file: 'Edit',
+  search_replace: 'Edit',
+  StrReplace: 'Edit',
+  MultiStrReplace: 'Edit',
+  apply_patch: 'Edit',
+  delete_file: 'Edit',
+  Delete: 'Edit',
+  write: 'Write',
+  Write: 'Write',
+  create_file: 'Write',
+  read_file: 'Read',
+  Read: 'Read',
+  grep: 'Search',
+  grep_search: 'Search',
+  ripgrep_raw_search: 'Search',
+  glob_file_search: 'Search',
+  codebase_search: 'Search',
+  file_search: 'Search',
+  list_dir: 'Search',
+  Grep: 'Search',
+  Glob: 'Search',
+  LS: 'Search',
+  web_search: 'Web',
+  fetch_url: 'Web',
+  WebSearch: 'Web',
+  WebFetch: 'Web',
+  todo_write: 'Todo',
+  TodoWrite: 'Todo',
+  task: 'Task',
+  Task: 'Task',
+  edit_notebook: 'Notebook',
+};
+
+const BY_TOOL: Record<Tool, Record<string, ToolCategory>> = {
+  'claude-code': CLAUDE_CODE,
+  codex: CODEX,
+  cursor: CURSOR,
+};
+
+/** The name and category a tool call is kept under. */
+export function normalizeToolName(
+  tool: Tool,
+  raw: string,
+): { name: string; category: ToolCategory } {
+  if (raw.startsWith('mcp__') || raw.startsWith('mcp_') || raw.startsWith('mcp:')) {
+    return { name: 'MCP', category: 'MCP' };
+  }
+  const category = Object.hasOwn(BY_TOOL[tool], raw) ? BY_TOOL[tool][raw] : undefined;
+  return category ? { name: raw, category } : { name: 'Other', category: 'Other' };
+}
+
+/** Claude Code's built-in slash commands; every other command counts as `custom`. */
+export const CLAUDE_CODE_COMMANDS: readonly string[] = [
+  'add-dir',
+  'agents',
+  'bashes',
+  'bug',
+  'clear',
+  'compact',
+  'config',
+  'context',
+  'cost',
+  'doctor',
+  'effort',
+  'exit',
+  'export',
+  'fast',
+  'feedback',
+  'help',
+  'hooks',
+  'ide',
+  'init',
+  'insights',
+  'install-github-app',
+  'login',
+  'logout',
+  'loop',
+  'mcp',
+  'memory',
+  'model',
+  'output-style',
+  'permissions',
+  'plan',
+  'plugin',
+  'pr-comments',
+  'privacy-settings',
+  'release-notes',
+  'resume',
+  'review',
+  'rewind',
+  'sandbox',
+  'security-review',
+  'skills',
+  'status',
+  'statusline',
+  'terminal-setup',
+  'todos',
+  'upgrade',
+  'usage',
+  'vim',
+];
+
+/** The key a slash command is counted under. */
+export function commandKey(raw: string): string {
+  const name = raw.trim().replace(/^\//, '').toLowerCase();
+  return CLAUDE_CODE_COMMANDS.includes(name) ? name : 'custom';
+}

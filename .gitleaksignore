@@ -1,0 +1,8 @@
+# Verified false positives: synthetic fixture text from the first fixture set, where random
+# letters spelled "key" next to another synthetic word. Later fixtures cannot form those
+# words (scripts/scrub.ts), so this list never grows.
+551cbe708fa45256be7ddce88cc89235f2ab4559:fixtures/home/.claude/projects/-home-dev-dir-177/c2a6badd-2386-438c-9eb4-0aa6cfd09652.jsonl:generic-api-key:323
+551cbe708fa45256be7ddce88cc89235f2ab4559:fixtures/home/.claude/projects/-home-dev-dir-177/c2a6badd-2386-438c-9eb4-0aa6cfd09652.jsonl:generic-api-key:6
+551cbe708fa45256be7ddce88cc89235f2ab4559:fixtures/home/.claude/projects/-home-dev-dir-177/c2a6badd-2386-438c-9eb4-0aa6cfd09652/subagents/agent-910beb19896f5a96a.jsonl:generic-api-key:2
+551cbe708fa45256be7ddce88cc89235f2ab4559:fixtures/home/.claude/projects/-home-dev-dir-89/3295cd20-85ed-4280-b9c2-c36c3a1ea82c.jsonl:generic-api-key:26
+551cbe708fa45256be7ddce88cc89235f2ab4559:fixtures/home/.claude/projects/-home-dev-dir-89/3295cd20-85ed-4280-b9c2-c36c3a1ea82c/subagents/agent-c9a98ea2954d7e77d.jsonl:generic-api-key:2

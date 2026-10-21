@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+
+# Supply chain: install only versions published at least 14 days ago.
+minimumReleaseAge: 20160
+
+# No dependency runs an install script. esbuild's only speeds up its own start, and it works
+# without it.
+allowBuilds:
+  esbuild: false

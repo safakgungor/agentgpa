@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# CLI output that can hold redacted quotes or local state. Never commit it.
+agentgpa-payload.json
+.agentgpa/
+
+# Built from fixtures/home/cursor-db.json by scripts/fixture-db.ts
+fixtures/home/.config/

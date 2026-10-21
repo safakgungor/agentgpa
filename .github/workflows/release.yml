@@ -1,0 +1,212 @@
+name: Release
+
+# Publishes agentgpa from a signed tag (vX.Y.Z) once the maintainer approves the `release`
+# environment: the npm package through trusted publishing (OIDC, so no npm token exists anywhere)
+# with provenance, and the standalone builds with their SHA-256 sums and build attestations.
+# Everything is built twice and must come out byte for byte the same, so anyone can rebuild a
+# release and compare. A manual run builds and checks everything and publishes nothing.
+# No caches: a release never builds from something an earlier run left behind.
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: tag, version and tests
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Read the version
+        id: version
+        run: echo "version=$(node -p "require('./packages/cli/package.json').version")" >> "$GITHUB_OUTPUT"
+      # The tag must be annotated, signed with a key GitHub verifies, name this version and
+      # point at this commit.
+      - name: Check the tag
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          test "$TAG" = "v$VERSION" || { echo "tag $TAG does not match the package version $VERSION"; exit 1; }
+          ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha')"
+          test "${ref%% *}" = tag || { echo "$TAG is not an annotated tag"; exit 1; }
+          tag="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/${ref##* }" --jq '[.verification.verified, .object.sha] | @tsv')"
+          test "$(cut -f1 <<<"$tag")" = true || { echo "$TAG is not signed with a key GitHub verifies"; exit 1; }
+          test "$(cut -f2 <<<"$tag")" = "$GITHUB_SHA" || { echo "$TAG does not point at this commit"; exit 1; }
+      - name: Check the package can be published
+        if: github.event_name == 'push'
+        run: node -e "if (require('./packages/cli/package.json').private) { console.error('packages/cli is still private'); process.exit(1) }"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
+  package:
+    name: npm package (build ${{ matrix.copy }})
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        copy: [a, b]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter agentgpa build
+      # One bundled file and its licenses: no dependencies, no install scripts, nothing else.
+      - run: node scripts/check-pack.ts
+      - name: Pack
+        working-directory: packages/cli
+        run: |
+          mkdir -p "$RUNNER_TEMP/package"
+          npm pack --pack-destination "$RUNNER_TEMP/package"
+          cd "$RUNNER_TEMP/package" && sha256sum agentgpa-*.tgz | tee package.sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-${{ matrix.copy }}
+          path: ${{ runner.temp }}/package/
+          retention-days: 7
+
+  standalone:
+    name: standalone build (${{ matrix.build }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - { os: macos-latest, build: macos-arm64 }
+          - { os: macos-15-intel, build: macos-x64 }
+          - { os: ubuntu-latest, build: linux-x64 }
+          - { os: windows-latest, build: windows-x64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Build twice and compare
+        shell: bash
+        working-directory: packages/cli
+        run: |
+          node standalone.ts
+          cp dist/agentgpa-*.sha256 "$RUNNER_TEMP/first.sha256"
+          node standalone.ts
+          diff <(cut -d' ' -f1 dist/agentgpa-*.sha256) <(cut -d' ' -f1 "$RUNNER_TEMP/first.sha256")
+          binary="$(ls dist/agentgpa-* | grep -v '\.sha256$')"
+          test "$(basename "${binary%.exe}")" = "agentgpa-${{ matrix.build }}"
+      - name: Start it
+        shell: bash
+        working-directory: packages/cli
+        run: |
+          binary="$(ls dist/agentgpa-* | grep -v '\.sha256$')"
+          "./$binary" --version
+          AGENTGPA_CONFIG_DIR="$RUNNER_TEMP/config" "./$binary" --offline --root ../../fixtures/home
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: standalone-${{ matrix.build }}
+          path: packages/cli/dist/agentgpa-*
+          retention-days: 7
+
+  publish:
+    name: publish (needs the maintainer's approval)
+    if: github.event_name == 'push'
+    needs: [check, package, standalone]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write # the GitHub release
+      id-token: write # npm trusted publishing and the attestations
+      attestations: write
+      artifact-metadata: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: ${{ runner.temp }}/artifacts
+      # The two package builds ran on separate machines and must be the same file.
+      - name: Gather the release files
+        run: |
+          cd "$RUNNER_TEMP/artifacts"
+          diff <(cut -d' ' -f1 package-a/package.sha256) <(cut -d' ' -f1 package-b/package.sha256)
+          mkdir -p "$RUNNER_TEMP/release"
+          cp package-a/agentgpa-*.tgz standalone-*/agentgpa-* "$RUNNER_TEMP/release/"
+          cd "$RUNNER_TEMP/release"
+          rm -f ./*.sha256
+          sha256sum agentgpa-* | tee SHA256SUMS
+          for f in ../artifacts/standalone-*/agentgpa-*.sha256; do
+            built="$(cut -d' ' -f1 "$f")"
+            grep -q "^$built " SHA256SUMS || { echo "a standalone build changed after it was built: $f"; exit 1; }
+          done
+          test "$(wc -l < SHA256SUMS)" -eq 5
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: ${{ runner.temp }}/release/SHA256SUMS
+      # Trusted publishing needs npm 11.5.1 or newer; provenance comes with it.
+      - name: Publish to npm
+        run: |
+          node -e "const [a,b,c]=process.argv[1].split('.').map(Number); if (a<11||(a===11&&(b<5||(b===5&&c<1)))) { console.error('npm '+process.argv[1]+' is too old for trusted publishing'); process.exit(1) }" "$(npm --version)"
+          if [ "$(npm view "agentgpa@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "agentgpa@$VERSION is already on npm"
+          else
+            npm publish "$RUNNER_TEMP/release/agentgpa-$VERSION.tgz" --access public --provenance
+          fi
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/release"
+          {
+            echo "agentgpa $VERSION: \`npx agentgpa@$VERSION\`, or a standalone build below for a machine without Node."
+            echo
+            echo "Check a download before you run it:"
+            echo
+            echo '```'
+            echo "sha256sum -c SHA256SUMS --ignore-missing"
+            echo "gh attestation verify agentgpa-linux-x64 --repo $GITHUB_REPOSITORY"
+            echo "npm audit signatures"
+            echo '```'
+            echo
+            echo "SHA-256:"
+            echo
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } > "$RUNNER_TEMP/notes.md"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" agentgpa-* SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" agentgpa-* SHA256SUMS --verify-tag --title "agentgpa $VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md" --repo "$GITHUB_REPOSITORY"
+          fi

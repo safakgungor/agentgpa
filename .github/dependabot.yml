@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Supply chain: propose a release only after it has been out for 14 days.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 5
+    ignore:
+      # The CLI runs on Node 22 and up, so its Node types stay on 22.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+    groups:
+      dev-tools:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14

@@ -1,0 +1,30 @@
+# The maintainer reviews every change once branch protection requires code owner review.
+* @safakgungor
+
+# What can leave a machine, and how: redaction, the payload, the event log, the deep read
+# packet, quotes, secret detection, the API contract, the network layer, consent, upload and
+# agent mode. Changes here rerun the leak suites.
+/packages/core/src/redaction.ts @safakgungor
+/packages/core/src/payload.ts @safakgungor
+/packages/core/src/skeleton.ts @safakgungor
+/packages/core/src/wire.ts @safakgungor
+/packages/core/src/packet.ts @safakgungor
+/packages/core/src/quotes.ts @safakgungor
+/packages/core/src/clean.ts @safakgungor
+/packages/core/src/secrets.ts @safakgungor
+/packages/core/src/api.ts @safakgungor
+/packages/cli/src/net.ts @safakgungor
+/packages/cli/src/api.ts @safakgungor
+/packages/cli/src/consent.ts @safakgungor
+/packages/cli/src/pending.ts @safakgungor
+/packages/cli/src/run.ts @safakgungor
+/packages/cli/src/agent.ts @safakgungor
+
+# What people install: the bundler, the standalone build, the package and the release workflow.
+/packages/cli/build.ts @safakgungor
+/packages/cli/standalone.ts @safakgungor
+/packages/cli/package.json @safakgungor
+/scripts/check-pack.ts @safakgungor
+/.github/ @safakgungor
+/pnpm-workspace.yaml @safakgungor
+/pnpm-lock.yaml @safakgungor

@@ -1,0 +1,157 @@
+import { createHash } from 'node:crypto';
+import {
+  createClaudeCodeParser,
+  createCodexParser,
+  createCursorParser,
+  type ParseResult,
+  type Tool,
+  type ToolCategory,
+} from '@agentgpa/core';
+import { readCursorDatabase } from './cursorDb.ts';
+import type { Discovery } from './discover.ts';
+import { readLines } from './read.ts';
+
+// Reads every file discovery found and runs the pure parsers over it. Transcript text stays
+// in memory; nothing here writes, logs or sends it.
+
+export interface ToolScan {
+  tool: Tool;
+  found: boolean;
+  readable: boolean;
+  files: Record<string, number>;
+  bytes: number;
+  ms: number;
+  result: ParseResult;
+  /** Per session file: its session, when it was created and its newest event. */
+  fileFacts: FileFact[];
+}
+
+export interface FileFact {
+  tool: Tool;
+  sessionId: string;
+  createdMs?: number;
+  newestMs?: number;
+}
+
+function fact(
+  tool: Tool,
+  sessionId: string,
+  createdMs: number | undefined,
+  newestMs: number,
+): FileFact {
+  const f: FileFact = { tool, sessionId };
+  if (createdMs !== undefined) f.createdMs = createdMs;
+  if (newestMs > 0) f.newestMs = newestMs;
+  return f;
+}
+
+export const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+/** Sees each tool output of a tool while it is parsed (the secret scan); nothing keeps the text. */
+export type ToolOutputHook = (
+  tool: Tool,
+) => ((text: string, ts: number, category: ToolCategory | undefined) => void) | undefined;
+
+export async function scan(
+  discovery: Discovery,
+  tools: readonly Tool[],
+  onToolOutput?: ToolOutputHook,
+): Promise<ToolScan[]> {
+  const out: ToolScan[] = [];
+  for (const tool of tools) {
+    const started = performance.now();
+    const hook = onToolOutput?.(tool);
+    if (tool === 'claude-code')
+      out.push({ ...(await claudeCode(discovery, hook)), ms: performance.now() - started });
+    else if (tool === 'codex')
+      out.push({ ...(await codex(discovery, hook)), ms: performance.now() - started });
+    else out.push({ ...(await cursor(discovery, hook)), ms: performance.now() - started });
+  }
+  return out;
+}
+
+type Hook = ((text: string, ts: number, category: ToolCategory | undefined) => void) | undefined;
+const options = (hook: Hook) => (hook ? { hash: sha256, onToolOutput: hook } : { hash: sha256 });
+
+async function claudeCode(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, 'ms'>> {
+  const parser = createClaudeCodeParser(options(hook));
+  const files: Record<string, number> = { main: 0, subagent: 0, 'workflow-agent': 0 };
+  let bytes = 0;
+  const fileFacts: FileFact[] = [];
+  for (const file of discovery.claude.files) {
+    files[file.kind] = (files[file.kind] ?? 0) + 1;
+    const target = { kind: file.kind, sessionId: file.sessionId };
+    let newest = 0;
+    const read = await readLines(file.path, (line) => {
+      const ts = parser.line(line, target);
+      if (ts !== undefined && ts > newest) newest = ts;
+    });
+    bytes += read.bytes;
+    parser.stats.oversized += read.oversized;
+    fileFacts.push(fact('claude-code', file.sessionId, file.createdMs, newest));
+  }
+  return {
+    tool: 'claude-code',
+    found: discovery.claude.found,
+    readable: true,
+    files,
+    bytes,
+    result: parser.finish(),
+    fileFacts,
+  };
+}
+
+async function codex(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, 'ms'>> {
+  const parser = createCodexParser(options(hook));
+  let bytes = 0;
+  const fileFacts: FileFact[] = [];
+  for (const file of discovery.codex.files) {
+    let newest = 0;
+    const read = await readLines(file.path, (line) => {
+      const ts = parser.line(line, file.sessionId);
+      if (ts !== undefined && ts > newest) newest = ts;
+    });
+    bytes += read.bytes;
+    parser.stats.oversized += read.oversized;
+    fileFacts.push(fact('codex', file.sessionId, file.createdMs, newest));
+  }
+  return {
+    tool: 'codex',
+    found: discovery.codex.found,
+    readable: true,
+    files: { rollout: discovery.codex.files.length },
+    bytes,
+    result: parser.finish(),
+    fileFacts,
+  };
+}
+
+async function cursor(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, 'ms'>> {
+  const parser = createCursorParser(options(hook));
+  let readable = true;
+  let bytes = 0;
+  for (const db of discovery.cursor.databases) {
+    const result = await readCursorDatabase(db, parser);
+    if (!result.readable) readable = false;
+  }
+  for (const file of discovery.cursor.transcripts) {
+    const read = await readLines(file.path, (line) =>
+      parser.transcriptLine(file.composerId, line, file.birthtimeMs),
+    );
+    bytes += read.bytes;
+    parser.stats.oversized += read.oversized;
+  }
+  return {
+    tool: 'cursor',
+    found: discovery.cursor.found,
+    readable,
+    files: {
+      database: discovery.cursor.databases.length,
+      transcript: discovery.cursor.transcripts.length,
+    },
+    bytes,
+    result: parser.finish(),
+    // One database holds every chat, so the file checks do not apply to Cursor.
+    fileFacts: [],
+  };
+}

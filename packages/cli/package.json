@@ -1,0 +1,39 @@
+{
+  "name": "agentgpa",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Your agent graded you. Grades how you work with your coding agents, from the sessions on this machine.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/safakgungor/agentgpa.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://agentgpa.dev",
+  "bugs": "https://github.com/safakgungor/agentgpa/issues",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "bin": {
+    "agentgpa": "dist/agentgpa.mjs"
+  },
+  "files": [
+    "dist/agentgpa.mjs",
+    "dist/LICENSE",
+    "dist/THIRD_PARTY_LICENSES.txt"
+  ],
+  "scripts": {
+    "dev": "node src/index.ts",
+    "build": "node build.ts",
+    "standalone": "node standalone.ts"
+  },
+  "devDependencies": {
+    "@agentgpa/core": "workspace:*",
+    "commander": "15.0.0",
+    "esbuild": "0.28.2",
+    "franc-min": "6.2.0",
+    "postject": "1.0.0-alpha.6",
+    "zod": "4.6.5"
+  }
+}
