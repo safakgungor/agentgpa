@@ -1,7 +1,6 @@
 {
   "name": "agentgpa",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Your agent graded you. Grades how you work with your coding agents, from the sessions on this machine.",
   "license": "MIT",
