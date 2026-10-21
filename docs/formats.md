@@ -16,7 +16,7 @@ The parsers live in `packages/core/src/parsers/`, file discovery in `packages/cl
 | `projects/<encoded cwd>/<session id>/subagents/workflows/wf_<id>/<name>.jsonl` | A workflow journal (`started`, `result`, `launched`, `failed` lines). Not a transcript; skipped. |
 | `projects/<encoded cwd>/<session id>/tool-results/` | Large tool outputs moved out of the transcript (text, images, PDFs). Not read. |
 | `projects/<encoded cwd>/<session id>/workflows/` | Workflow scripts. Not read. |
-| `settings.json` | `cleanupPeriodDays` (30 when absent). |
+| `settings.json` | `cleanupPeriodDays` (30 when absent). Shown by `--debug`; the period does not depend on it. |
 
 Subagent lines carry `isSidechain: true`, an `agentId` and the parent's `sessionId`, so they join the parent session. Older versions wrote subagent lines into the main file with `isSidechain: true` (*not seen*); the parser handles both.
 

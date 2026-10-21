@@ -204,10 +204,10 @@ describe('a run with a code from /start', () => {
     const root = await fixtureHome();
     const t = io();
     expect(await runScan({ root, code: CODE }, t.io)).toBe(0);
-    expect(PayloadSchema.parse(seen.reports[0]).consents).toEqual({
-      researchAggregates: false,
-      deepRead: true,
-    });
+    const sent = PayloadSchema.parse(seen.reports[0]);
+    expect(sent.consents).toEqual({ researchAggregates: false, deepRead: true });
+    // Every tool counts the whole period, Claude Code too, whatever cleanupPeriodDays says.
+    expect(sent.observedDays).toEqual({ 'claude-code': 90, codex: 90, cursor: 90 });
     expect(seen.packets).toHaveLength(1);
     // The fixtures' synthetic project folders, by their own names only, never a path.
     const packet = seen.packets[0] as Packet;

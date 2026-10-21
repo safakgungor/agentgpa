@@ -30,7 +30,7 @@ Then the CLI opens your report page in the browser (in agent mode, your agent te
 | `schemaVersion`, `gradingVersion`, `cliVersion` | Versions of the payload, the grading and the CLI |
 | `generatedAt` | When the report was made |
 | `period` | Start, end and length in days of the period graded |
-| `observedDays` | Per tool, the days it could have recorded (Claude Code keeps 30 days unless you raised `cleanupPeriodDays`) |
+| `observedDays` | Per tool, the days of the period it is counted over: the whole period for every tool |
 | `tools` | Per tool: found, readable, and sessions and prompts in the period |
 | `allTime` | Per tool: when its first session on this machine started, and all-time sessions and prompts |
 | `primaryTool` | The tool with the most prompts, or `multi` |

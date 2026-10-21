@@ -158,8 +158,11 @@ async function read(
 ): Promise<Scanned> {
   const started = performance.now();
   const discovery = discover({ root: o.root, env, home: io.home });
+  // Every tool counts the whole period. Claude Code deletes a transcript once it has not changed
+  // for cleanupPeriodDays (30 by default), but a file it keeps still holds its older events, and
+  // those count too; the setting only shows in --debug.
   const observedDays: Partial<Record<Tool, number>> = {
-    'claude-code': Math.min(o.days, discovery.claude.cleanupPeriodDays),
+    'claude-code': o.days,
     codex: o.days,
     cursor: o.days,
   };

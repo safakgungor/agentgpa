@@ -6,13 +6,13 @@ How AgentGPA turns the sessions on your machine into a report card. All of it li
 
 The period is the last 90 days by default (`--since 7d`, `14d` or `30d` for shorter reports), counted back from the moment of the scan.
 
-Tools keep different amounts of history. Claude Code deletes sessions older than its `cleanupPeriodDays` setting (30 days unless you changed it); Codex and Cursor keep everything. A tool's **observed days** are the days of the period it could have recorded: Claude Code `min(period, cleanupPeriodDays)`, Codex and Cursor the whole period.
+Every tool counts the whole period. Claude Code deletes a transcript once it has gone unchanged for its `cleanupPeriodDays` setting (30 days unless you changed it), but a session file it keeps, for example one you came back to, still holds its older events, and those count like any other. Codex and Cursor keep everything. A tool's **observed days** are the days of the period it is counted over: the whole period for every tool. (Until 0.1.0, Claude Code's were `min(period, cleanupPeriodDays)`.)
 
-- Events older than a tool's observed days are left out of every metric. A Claude Code session that happens to survive cleanup does not count more for one person than for another.
-- Attendance compares active days with observed days for each tool.
+- Events older than the period are left out of every metric.
+- Attendance compares active days with observed days for each tool, so days whose sessions Claude Code already deleted count as days without work.
 - Counts that grades, archetypes and activities compare with a threshold (secrets, cost, marathons, caps crises, commits) are scaled to **30 observed days** for each tool and then summed: `count x 30 / observedDays`.
 
-So the same habits earn the same grades whichever tool recorded them. A test checks it: thirty days of a habit in Claude Code (30 days kept) and ninety days of it in Codex give the same grades.
+So the same habits earn the same grades whichever window recorded them. A test checks the scaling: thirty days of a habit observed over 30 days and ninety days of it observed over 90 give the same grades.
 
 ## Courses
 
