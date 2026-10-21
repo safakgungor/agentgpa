@@ -4,7 +4,8 @@ import { type ConsentQuote, KIND_NAMES } from './consent.ts';
 // Agent mode (the copy-prompt flow): plain text for the user's own agent to relay, under 8,000
 // characters, with no colors and no questions of its own. It holds the preview, exactly what
 // would be sent, the quotes as data for the user to review and the one command to run after a
-// yes. It never holds prompt text beyond those quotes, nor paths or file contents.
+// yes. It never holds prompt text beyond those quotes, nor file contents, nor paths other than
+// the program that command starts, which the agent ran a moment ago.
 
 export const AGENT_OUTPUT_LIMIT = 8000;
 
@@ -27,6 +28,8 @@ export interface AgentRunView {
   command: string;
   /** Why uploading is not possible right now, when it is not. */
   blocked?: string;
+  /** The server, when it is not agentgpa.dev (AGENTGPA_API_URL). */
+  customHost?: string;
 }
 
 export function renderAgentRun(v: AgentRunView): string {
@@ -35,6 +38,10 @@ export function renderAgentRun(v: AgentRunView): string {
   const secrets = v.report.device.secrets.pasted + v.report.device.secrets.exposedViaTools;
   const out: string[] = [];
   out.push(`AGENTGPA ${v.version} · AGENT MODE · NOTHING HAS BEEN SENT`);
+  if (v.customHost)
+    out.push(
+      `Using ${v.customHost}, not agentgpa.dev: this run is report only, and the deep read is off.`,
+    );
   out.push(
     `Found: ${v.tools
       .map(

@@ -31,6 +31,7 @@ import { configDir, loadConfig, saveConfig } from './config.ts';
 import { askConsent, type ConsentQuote, type ConsentState, renderConsent } from './consent.ts';
 import { discover } from './discover.ts';
 import { checkFiles, type Forensics, withoutExcluded } from './forensics.ts';
+import { invocation, type Program, thisProgram } from './invocation.ts';
 import { CTRL_C, ENTER, ESCAPE, type KeyReader, terminalKeys } from './keys.ts';
 import { detectLanguage } from './language.ts';
 import { apiOrigin, createNet, NetError, type Origin } from './net.ts';
@@ -104,6 +105,8 @@ export interface Io {
   powWorkers?: number;
   /** Stands in for agentgpa.dev (tests only; users cannot reach this). */
   officialApi?: string;
+  /** How this CLI was started, for the command it prints in agent mode (tests pass one). */
+  program?: Program;
 }
 
 const PERIODS = new Map([
@@ -829,7 +832,9 @@ async function agentRun(
       : o.online?.token
         ? undefined
         : (o.online?.blocked ?? 'Uploads are not available right now.');
-  const command = `npx -y agentgpa@${VERSION} upload${o.code ? ` --code ${o.code}` : ''}`;
+  // The upload starts the CLI the way the agent just did: npx, the standalone build or a copy.
+  const program = invocation(io.program ?? thisProgram(), VERSION, o.platform);
+  const command = `${program} upload${o.code ? ` --code ${o.code}` : ''}`;
   const text = renderAgentRun({
     version: VERSION,
     report: safe,
@@ -840,6 +845,7 @@ async function agentRun(
     deepReadPrompts,
     command,
     ...(blocked ? { blocked } : {}),
+    ...(o.origin.isDefault ? {} : { customHost: o.origin.host }),
   });
   io.out(text.length > AGENT_OUTPUT_LIMIT ? text.slice(0, AGENT_OUTPUT_LIMIT) : text);
   if (blocked || !o.online?.token) return 0;
@@ -855,6 +861,7 @@ async function agentRun(
   writePending(o.dir, {
     createdAt: io.now ?? Date.now(),
     ...(o.code ? { code: o.code } : {}),
+    origin: o.origin.url.origin,
     payload,
     // The same place and period, so `upload --deep-read` reads exactly these sessions again.
     scan: {
@@ -890,6 +897,25 @@ export async function runUpload(options: UploadOptions, io: Io): Promise<number>
       'No report is waiting to upload. Run the --agent command again: a waiting report expires after 30 minutes.',
     );
     return 1;
+  }
+  // A waiting report goes to the server it was prepared for and nowhere else: the upload needs
+  // no AGENTGPA_API_URL of its own, and one that names another server is refused.
+  if (pending.origin) {
+    let prepared: Origin;
+    try {
+      prepared = apiOrigin({ AGENTGPA_API_URL: pending.origin }, io.officialApi);
+    } catch {
+      removePending(dir, options.code);
+      io.out('The waiting report is broken, so it was dropped. Run the --agent command again.');
+      return 1;
+    }
+    if (env.AGENTGPA_API_URL && prepared.url.origin !== origin.url.origin) {
+      io.out(
+        `This report was prepared for ${prepared.host}, not ${origin.host}, so it was not sent. Run the --agent command again.`,
+      );
+      return 1;
+    }
+    origin = prepared;
   }
   const count = pending.payload.quotes.length;
   const drop = (options.dropQuotes ?? '')

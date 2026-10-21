@@ -9,7 +9,7 @@ Before you answer, you can see both:
 
 ## When the CLI talks to the network
 
-Every request goes through `packages/cli/src/net.ts`, to one origin: `https://agentgpa.dev`, unless `AGENTGPA_API_URL` names another (any other origin makes the run report only and turns the deep read off). With `--offline`, `--dry-run`, `--json` or `--show-packet` the CLI makes no request at all.
+Every request goes through `packages/cli/src/net.ts`, to one origin: `https://agentgpa.dev`, unless `AGENTGPA_API_URL` names another (any other origin makes the run report only and turns the deep read off). With `--offline`, `--dry-run`, `--json` or `--show-packet` the CLI makes no request at all. In agent mode the waiting report remembers the origin it was prepared for: `upload` sends it there without needing `AGENTGPA_API_URL` again, and refuses when `AGENTGPA_API_URL` names another origin.
 
 | Request | When | What it sends |
 | --- | --- | --- |

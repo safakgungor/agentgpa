@@ -9,7 +9,7 @@ import { leadingZeroBits, PacketSchema, PayloadSchema, TelemetrySchema } from '@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parseClaude, parseCodex, parseCursor } from '../../core/test/fixtures.ts';
 import { scriptedKeys } from '../src/keys.ts';
-import { type Io, runScan, runUpload } from '../src/run.ts';
+import { type Io, runScan, runUpload, VERSION } from '../src/run.ts';
 import { fixtureHome } from './home.ts';
 
 // The whole CLI against a stand-in AgentGPA server on this machine. The fixture home's sessions
@@ -137,6 +137,12 @@ function io(keys: string[] | null, extra: Partial<Io> = {}) {
       clock += ms;
     },
     timeZone: 'UTC',
+    // As if npx had started the CLI, the way the copy prompt does.
+    program: {
+      script: '/home/dev/.npm/_npx/0f1e2d3c/node_modules/agentgpa/dist/agentgpa.mjs',
+      execPath: '/usr/local/bin/node',
+      sea: false,
+    },
     ...extra,
   };
   return { io: value, out, opened, config };
@@ -304,7 +310,8 @@ describe('the agent flow', () => {
     expect(text.length).toBeLessThan(8000);
     expect(text).toContain('AGENT MODE · NOTHING HAS BEEN SENT');
     expect(text).toContain('Mira (@mira-dev)');
-    expect(text).toContain('upload --code K7Q3-PX9M');
+    expect(text).toContain(`npx -y agentgpa@${VERSION} upload --code K7Q3-PX9M`);
+    expect(text).not.toContain('not agentgpa.dev');
     expect(text).toContain('- Research: ON unless the user turns it off.');
     expect(text).toContain('[--no-research]');
     expect(text).not.toContain(root);
@@ -327,6 +334,8 @@ describe('the agent flow', () => {
     const pending = join(t.config, 'pending');
     const files = readdirSync(pending);
     expect(files).toEqual(['K7Q3-PX9M.json']);
+    const waiting = JSON.parse(readFileSync(join(pending, 'K7Q3-PX9M.json'), 'utf8'));
+    expect(waiting.origin).toBe(new URL(base).origin);
     if (process.platform !== 'win32') {
       expect(statSync(pending).mode & 0o777).toBe(0o700);
       expect(statSync(join(pending, files[0] as string)).mode & 0o777).toBe(0o600);
@@ -362,6 +371,48 @@ describe('the agent flow', () => {
     again.io.env = { ...t.io.env };
     await runScan({ root, offline: true }, again.io);
     expect(readdirSync(join(t.config, 'pending'))).toEqual([]);
+  });
+
+  it('prints the upload command the way the CLI was started', async () => {
+    const root = await fixtureHome();
+    const build = '/home/dev/Downloads/agentgpa-linux-x64';
+    const t = io(null, {
+      program: { script: build, execPath: build, sea: true },
+      platform: 'linux',
+    });
+    await runScan({ root, agent: true, code: 'K7Q3-PX9M' }, t.io);
+    const text = t.out.join('\n');
+    expect(text).toContain(`${build} upload --code K7Q3-PX9M`);
+    expect(text).not.toContain('npx');
+  });
+
+  it('uploads to the server the report was prepared for, and refuses another one', async () => {
+    const root = await fixtureHome();
+    const custom = base.replace('127.0.0.1', 'localhost');
+    const t = io(null);
+    t.io.env = { ...t.io.env, AGENTGPA_API_URL: custom };
+    await runScan({ root, agent: true, code: 'K7Q3-PX9M' }, t.io);
+    expect(t.out.join('\n')).toContain(
+      `Using ${new URL(custom).host}, not agentgpa.dev: this run is report only`,
+    );
+
+    // The agent runs the upload command without AGENTGPA_API_URL: it still goes there.
+    const up = io(null);
+    up.io.env = { AGENTGPA_CONFIG_DIR: t.config };
+    expect(await runUpload({ code: 'K7Q3-PX9M', deepRead: true }, up.io)).toBe(0);
+    expect(seen.reports).toHaveLength(1);
+    expect(PayloadSchema.parse(seen.reports[0]).client.origin).toBe('custom');
+    expect(seen.packets).toHaveLength(0);
+
+    // An upload that names another server sends nothing.
+    await runScan({ root, agent: true, code: 'K7Q3-PX9M' }, t.io);
+    const other = io(null);
+    other.io.env = { AGENTGPA_CONFIG_DIR: t.config, AGENTGPA_API_URL: 'https://example.org' };
+    expect(await runUpload({ code: 'K7Q3-PX9M' }, other.io)).toBe(1);
+    expect(other.out.join('\n')).toContain(
+      `This report was prepared for ${new URL(custom).host}, not example.org`,
+    );
+    expect(seen.reports).toHaveLength(1);
   });
 
   it('refuses --show-packet in agent mode and a malformed link code', async () => {

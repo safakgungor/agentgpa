@@ -21,6 +21,8 @@ export const PENDING_MINUTES = 30;
 const PendingSchema = z.strictObject({
   createdAt: z.number().int(),
   code: z.string().optional(),
+  /** The API origin the report was prepared for; `upload` sends it there and nowhere else. */
+  origin: z.string().optional(),
   payload: PayloadSchema,
   /** How to read the same period again, for the deep read. */
   scan: z.strictObject({
