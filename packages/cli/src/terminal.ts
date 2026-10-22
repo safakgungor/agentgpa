@@ -114,6 +114,27 @@ export function canvas(style: Style, accent = DEFAULT_ACCENT): Canvas {
   return { line, width, fit, spread, row, rule, hr };
 }
 
+/**
+ * Progress on stderr: in a terminal one line rewrites itself and is cleared before the
+ * result is printed; anywhere else, an agent or a pipe, each step is a plain line of its own.
+ */
+export function progressLine(
+  stream: { isTTY?: boolean; write: (text: string) => unknown },
+  env: Record<string, string | undefined>,
+): (text: string | null) => void {
+  const live = stream.isTTY === true && env.TERM !== 'dumb';
+  let showing = false;
+  return (text) => {
+    if (!live) {
+      if (text !== null) stream.write(`${text}\n`);
+      return;
+    }
+    if (text === null && !showing) return;
+    stream.write(`\r${ESC}[2K${text ?? ''}`);
+    showing = text !== null;
+  };
+}
+
 /** Words of a text in lines of at most `room` columns. */
 export function wrap(text: string, room: number): string[] {
   const lines: string[] = [];

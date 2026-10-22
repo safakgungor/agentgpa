@@ -43,7 +43,8 @@ export interface Api {
   /** A run token, bought with a solved proof-of-work challenge. */
   runToken(request: Omit<RunRequest, 'challenge' | 'nonce'>): Promise<RunToken>;
   upload(payload: Payload, runToken: string): Promise<ReportAccepted>;
-  sendDeepRead(token: string, packet: Packet): Promise<void>;
+  /** `retries` overrides the client's own retries, for a run that keeps its own clock. */
+  sendDeepRead(token: string, packet: Packet, retries?: number): Promise<void>;
 }
 
 export function createApi(net: Net, retry: RetryOptions = {}, workers?: number): Api {
@@ -103,7 +104,7 @@ export function createApi(net: Net, retry: RetryOptions = {}, workers?: number):
       return ok(answer);
     },
 
-    async sendDeepRead(token, packet) {
+    async sendDeepRead(token, packet, retries) {
       const answer = await withRetries(
         () =>
           net.request({
@@ -115,7 +116,7 @@ export function createApi(net: Net, retry: RetryOptions = {}, workers?: number):
             headers: { 'x-agentgpa-deep-read-token': token },
             timeoutMs: 60_000,
           }),
-        retry,
+        retries === undefined ? retry : { ...retry, retries },
       );
       ok(answer);
     },

@@ -40,8 +40,13 @@ let mode: {
   uploads: 'open' | 'paused';
   consents: { researchAggregates: boolean; deepRead: boolean };
   refuse?: number;
-  /** Busy answers 429 with a Retry-After once; limit always answers 429 without one. */
-  deepRead?: 'busy' | 'limit';
+  /** The reports route answers this instead of taking the report. */
+  reportStatus?: number;
+  /**
+   * Busy answers 429 with a Retry-After once, swamped always does; limit always answers 429
+   * without one.
+   */
+  deepRead?: 'busy' | 'swamped' | 'limit';
 };
 /** Codes that already started a run: each works once. */
 let used: Set<string>;
@@ -101,6 +106,7 @@ beforeAll(async () => {
         });
       }
       if (req.method === 'POST' && path === '/api/cli/reports') {
+        if (mode.reportStatus) return send(res, mode.reportStatus, {});
         const payload = PayloadSchema.parse(body(req, raw));
         seen.reports.push(payload);
         return send(res, 202, {
@@ -111,8 +117,8 @@ beforeAll(async () => {
       if (req.method === 'POST' && path === '/api/cli/deep-read') {
         seen.deepReadTries++;
         if (mode.deepRead === 'limit') return send(res, 429, {});
-        if (mode.deepRead === 'busy') {
-          delete mode.deepRead;
+        if (mode.deepRead === 'busy' || mode.deepRead === 'swamped') {
+          if (mode.deepRead === 'busy') delete mode.deepRead;
           res.writeHead(429, { 'content-type': 'application/json', 'retry-after': '20' });
           return res.end('{}');
         }
@@ -138,6 +144,9 @@ afterEach(() => expect(seen.other).toEqual([]));
 function io(extra: Partial<Io> = {}) {
   const out: string[] = [];
   const opened: string[] = [];
+  /** The progress lines, in order, and how many deep read tries had happened at each opening. */
+  const progress: string[] = [];
+  const openedAfterTries: number[] = [];
   let clock = NOW;
   const config = mkdtempSync(join(tmpdir(), 'agentgpa-flow-'));
   const value: Io = {
@@ -150,7 +159,11 @@ function io(extra: Partial<Io> = {}) {
     officialApi: base,
     open: (url) => {
       opened.push(url.href);
+      openedAfterTries.push(seen.deepReadTries);
       return true;
+    },
+    progress: (text) => {
+      if (text !== null) progress.push(text);
     },
     clock: () => clock,
     sleep: async (ms) => {
@@ -159,7 +172,7 @@ function io(extra: Partial<Io> = {}) {
     timeZone: 'UTC',
     ...extra,
   };
-  return { io: value, out, opened, config };
+  return { io: value, out, opened, config, progress, openedAfterTries };
 }
 
 /** No grade, archetype, line or quote of the fixture's report reaches the text. */
@@ -197,6 +210,15 @@ describe('a run with a code from /start', () => {
     expect(payload.client.runMode).toBe('terminal');
     expect(seen.packets).toHaveLength(0);
     expectNoResults(text, payload);
+    // What it does as it goes, neutral words only.
+    expect(t.progress).toEqual([
+      `Checking ${new URL(base).host}`,
+      'Reading Claude Code',
+      'Reading Codex',
+      'Reading Cursor',
+      'Sending',
+    ]);
+    expect(text.endsWith('Nothing else left this machine.')).toBe(true);
   });
 
   it('sends the deep read in the same run when the owner chose it on /start', async () => {
@@ -213,7 +235,15 @@ describe('a run with a code from /start', () => {
     const packet = seen.packets[0] as Packet;
     expect(packet.projects.length).toBeGreaterThan(0);
     for (const name of packet.projects) expect(name).not.toMatch(/[/\\]/);
-    expect(t.out.join('\n')).toContain('research off · deep read sent, read once and dropped');
+    const text = t.out.join('\n');
+    expect(text).toContain('research off · deep read on, sent next, read once and dropped');
+    // The report's address and the browser come first; the deep read follows.
+    expect(t.openedAfterTries).toEqual([0]);
+    expect(text.indexOf('YOUR REPORT IS READY')).toBeLessThan(
+      text.indexOf('Deep read sent, read once and dropped'),
+    );
+    expect(text.endsWith('Nothing else left this machine.')).toBe(true);
+    expect(t.progress.slice(-2)).toEqual(['Sending', 'Sending the deep read']);
   });
 
   it('waits while the deep read is busy, and stops at once at its daily limit', async () => {
@@ -224,14 +254,27 @@ describe('a run with a code from /start', () => {
     expect(await runScan({ root, code: CODE }, busy.io)).toBe(0);
     expect(seen.deepReadTries).toBe(2);
     expect(seen.packets).toHaveLength(1);
-    expect(busy.out.join('\n')).toContain('deep read sent, read once and dropped');
+    expect(busy.out.join('\n')).toContain('Deep read sent, read once and dropped');
     mode.deepRead = 'limit';
     const limit = io();
     expect(await runScan({ root, code: 'K7Q3-PX9N' }, limit.io)).toBe(0);
     // One try and the client's two retries, then no more: no Retry-After, no waiting.
     expect(seen.deepReadTries).toBe(5);
     expect(seen.reports).toHaveLength(2);
-    expect(limit.out.join('\n')).toContain('deep read not sent');
+    expect(limit.out.join('\n')).toContain(
+      'The deep read did not go through. Your report is ready.',
+    );
+  });
+
+  it('gives a spent code no second try: a failed upload asks for a new code', async () => {
+    mode.reportStatus = 500;
+    const root = await fixtureHome();
+    const t = io();
+    expect(await runScan({ root, code: CODE }, t.io)).toBe(1);
+    expect(t.out.join('\n')).toContain(
+      `The report did not go through: the server answered 500. Make a new code on ${new URL(base).host}/start and run the new command.`,
+    );
+    expect(t.opened).toEqual([]);
   });
 
   it('keeps the deep read off and says so for any other server', async () => {
@@ -327,6 +370,23 @@ describe('the agent flow', () => {
     const payload = PayloadSchema.parse(seen.reports[0]);
     expect(payload.client.runMode).toBe('agent');
     expectNoResults(text, payload);
+  });
+
+  it('gives up the deep read after a minute while the servers are busy', async () => {
+    mode.consents = { researchAggregates: true, deepRead: true };
+    mode.deepRead = 'swamped';
+    const root = await fixtureHome();
+    const t = io();
+    expect(await runScan({ root, agent: true, code: CODE }, t.io)).toBe(0);
+    const text = t.out.join('\n');
+    // Tries at 0, 20, 40 and 60 seconds; the next wait would pass the minute.
+    expect(seen.deepReadTries).toBe(4);
+    expect(text.indexOf('Tell the user the report is ready at')).toBeLessThan(
+      text.indexOf('Deep read skipped, the servers are busy. Your report is ready.'),
+    );
+    expect(text).toContain('The deep read the user chose goes next, at most a minute.');
+    expect(t.progress).toContain('Deep read: the readers are busy, trying again');
+    expect(seen.reports).toHaveLength(1);
   });
 
   it('stops a second run of the same code before reading anything', async () => {

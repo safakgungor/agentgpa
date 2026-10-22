@@ -1,4 +1,5 @@
 import { cleanText, type RunConsents, type Tool } from '@agentgpa/core';
+import type { CursorUnreadable } from './cursorDb.ts';
 import { canvas, type Style } from './terminal.ts';
 
 // The terminal screens of a run. None of them shows a result: grades, quotes and findings are
@@ -11,8 +12,15 @@ const TOOL_NAMES: Record<Tool, string> = {
   cursor: 'Cursor',
 };
 
+export interface ToolFound {
+  tool: Tool;
+  found: boolean;
+  readable: boolean;
+  unreadable?: CursorUnreadable;
+}
+
 /** "Found Claude Code and Codex · Cursor not found", and readable tools only count as found. */
-export function foundLine(tools: readonly { tool: Tool; found: boolean; readable: boolean }[]) {
+export function foundLine(tools: readonly ToolFound[]) {
   const names = (list: typeof tools) => list.map((t) => TOOL_NAMES[t.tool]);
   const and = (list: string[]) =>
     list.length <= 1 ? (list[0] ?? '') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`;
@@ -25,6 +33,19 @@ export function foundLine(tools: readonly { tool: Tool; found: boolean; readable
     ...(missing.length ? [`${and(missing)} not found`] : []),
   ].join(' · ');
 }
+
+/** What to change when Cursor was found but not read. Printing it changes no payload. */
+export const UNREADABLE_FIX: Record<CursorUnreadable, string> = {
+  'sqlite unavailable': 'Cursor: update Node to 22.13 or newer, which can read its database.',
+  'cannot open': 'Cursor: its database did not open. Quit Cursor before your next run.',
+  'no chat tables': 'Cursor: no chats where this version looks. A newer CLI may read them.',
+};
+
+/** One line per tool that was found and not read, naming the fix. */
+export const fixLines = (tools: readonly ToolFound[]): string[] =>
+  tools.flatMap((t) =>
+    t.found && !t.readable && t.unreadable ? [UNREADABLE_FIX[t.unreadable]] : [],
+  );
 
 const plural = (n: number, one: string, many: string) =>
   `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
@@ -85,10 +106,15 @@ export function codeRefusal(status: number, host: string): string {
   return `That code is not one we know. Open ${host}/start for a new one.`;
 }
 
+/** The deep read as the report box is shown: off, sent right after it, or not sent at all. */
+export type DeepReadNext = 'off' | 'next' | 'not sent';
+/** How the deep read ended, once the report box is on the screen. */
+export type DeepReadEnd = 'sent' | 'busy' | 'failed';
+
 export interface RunDone {
   version: string;
   handle?: string | undefined;
-  tools: readonly { tool: Tool; found: boolean; readable: boolean }[];
+  tools: readonly ToolFound[];
   sessions: number;
   /** The period read, in days (--since). */
   days: number;
@@ -96,10 +122,19 @@ export interface RunDone {
   sentSeconds: number;
   quotes: number;
   consents: RunConsents;
-  deepReadSent: boolean;
+  deepRead: DeepReadNext;
   page: URL;
   opened: boolean;
 }
+
+const DEEP_READ_LINE: Record<DeepReadNext, string> = {
+  off: 'deep read off',
+  next: 'deep read on, sent next, read once and dropped',
+  'not sent': 'deep read not sent',
+};
+
+/** The last line of a run, once nothing more will leave. */
+const NOTHING_ELSE = 'Nothing else left this machine.';
 
 /** A run with a code, once it was sent: what was read and sent, and where the report is. */
 export function renderRunDone(o: RunDone, style: Style): string[] {
@@ -111,6 +146,7 @@ export function renderRunDone(o: RunDone, style: Style): string[] {
       ['✓ ', 'acc'],
       [foundLine(o.tools), ''],
     ]),
+    ...fixLines(o.tools).map((fix) => c.line([[`  ${fix}`, 'dim']])),
     c.line([
       ['✓ ', 'acc'],
       [`Read ${plural(o.sessions, 'session', 'sessions')} from the last ${o.days} days`, ''],
@@ -129,7 +165,7 @@ export function renderRunDone(o: RunDone, style: Style): string[] {
     ]),
     c.line([
       [
-        `  research ${o.consents.researchAggregates ? 'on' : 'off'} · deep read ${o.consents.deepRead ? (o.deepReadSent ? 'sent, read once and dropped' : 'not sent') : 'off'}`,
+        `  research ${o.consents.researchAggregates ? 'on' : 'off'} · ${DEEP_READ_LINE[o.deepRead]}`,
         'dim',
       ],
     ]),
@@ -147,7 +183,30 @@ export function renderRunDone(o: RunDone, style: Style): string[] {
     c.row([['Confirm the run with one click to make it yours.', '']]),
     c.row(),
     c.rule('╰', '╯'),
-    c.line([['Nothing else left this machine.', '']]),
+    // With the deep read still to go, the last line waits for it (renderDeepRead).
+    ...(o.deepRead === 'next' ? [] : [c.line([[NOTHING_ELSE, '']])]),
+  ];
+}
+
+/** After the report box: how the deep read went, and then that nothing else left. */
+export function renderDeepRead(end: DeepReadEnd, seconds: number, style: Style): string[] {
+  const c = canvas(style);
+  return [
+    end === 'sent'
+      ? c.line([
+          ['✓ ', 'acc'],
+          ['Deep read sent, read once and dropped', ''],
+          [`   ${seconds.toFixed(1)} s`, 'dim'],
+        ])
+      : c.line([
+          [
+            end === 'busy'
+              ? 'Deep read skipped, the servers are busy. Your report is ready.'
+              : 'The deep read did not go through. Your report is ready.',
+            '',
+          ],
+        ]),
+    c.line([[NOTHING_ELSE, '']]),
   ];
 }
 
@@ -170,6 +229,7 @@ export function renderOffline(
       ['✓ ', 'acc'],
       [foundLine(o.tools), ''],
     ]),
+    ...fixLines(o.tools).map((fix) => c.line([[`  ${fix}`, 'dim']])),
     c.line([
       ['✓ ', 'acc'],
       [`Read ${plural(o.sessions, 'session', 'sessions')} from the last ${o.days} days`, ''],

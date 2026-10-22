@@ -1,11 +1,13 @@
-// The published package is one bundled file and its licenses: no runtime dependencies, no
-// install scripts and nothing else. CI runs this after the build; it fails on any difference.
+// The published package is one bundled file, its licenses and its README: no runtime
+// dependencies, no install scripts and nothing else. CI runs this after the build; it fails on
+// any difference.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const dir = join(import.meta.dirname, '..', 'packages', 'cli');
 const allowed = [
+  'README.md',
   'dist/LICENSE',
   'dist/THIRD_PARTY_LICENSES.txt',
   'dist/agentgpa.mjs',

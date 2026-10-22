@@ -21,7 +21,12 @@ import {
   type Tool,
 } from '@agentgpa/core';
 import pkg from '../package.json' with { type: 'json' };
-import { AGENT_OUTPUT_LIMIT, renderAgentRun, renderAgentStop } from './agent.ts';
+import {
+  AGENT_OUTPUT_LIMIT,
+  renderAgentDeepRead,
+  renderAgentRun,
+  renderAgentStop,
+} from './agent.ts';
 import { type Api, ApiError, createApi } from './api.ts';
 import { openInBrowser, reportUrl } from './browser.ts';
 import { configDir, loadConfig } from './config.ts';
@@ -33,10 +38,13 @@ import { debugReport } from './report.ts';
 import { scan, sha256 } from './scan.ts';
 import {
   codeRefusal,
+  type DeepReadEnd,
+  renderDeepRead,
   renderOffline,
   renderPaused,
   renderRunDone,
   renderStartOnWebsite,
+  type ToolFound,
 } from './screens.ts';
 import { detectStyle, type Style } from './terminal.ts';
 
@@ -48,9 +56,14 @@ import { detectStyle, type Style } from './terminal.ts';
 
 export const VERSION = pkg.version;
 const MAX_UPLOAD_BYTES = 1024 * 1024;
-/** How long the deep read keeps trying while the server's readers are busy. */
-const DEEP_READ_WAIT_MS = 10 * 60_000;
-const DEEP_READ_RETRY_MS = 3000;
+/**
+ * How long the deep read keeps trying while the server's readers are busy. An agent's command can
+ * time out, so in agent mode it gives up after a minute: the report is ready either way.
+ */
+export const DEEP_READ = {
+  waitMs: { terminal: 10 * 60_000, agent: 60_000 },
+  retryMs: 3000,
+} as const;
 
 export interface ScanOptions {
   dryRun?: boolean;
@@ -86,7 +99,18 @@ export interface Io {
   powWorkers?: number;
   /** Stands in for agentgpa.dev (tests only; users cannot reach this). */
   officialApi?: string;
+  /**
+   * Neutral progress while it works: "Checking agentgpa.dev", "Reading Codex", "Sending".
+   * null clears a line a terminal shows in place. Never a result, a path or session text.
+   */
+  progress?: (text: string | null) => void;
 }
+
+const TOOL_NAMES: Record<Tool, string> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  cursor: 'Cursor',
+};
 
 const PERIODS = new Map([
   ['7d', 7],
@@ -131,7 +155,7 @@ interface Scanned {
   sessions: Session[];
   /** The sessions that passed the file checks. */
   kept: Session[];
-  tools: { tool: Tool; found: boolean; readable: boolean }[];
+  tools: ToolFound[];
   forensics: Forensics;
   context: RedactionContext;
   scanMs: number;
@@ -168,14 +192,19 @@ async function read(
   };
   const window = { end: o.end, days: o.days, observedDays };
   const scanner = new SecretScanner();
-  const scans = await scan(discovery, o.tools, (tool) => {
-    const from = observedWindowStart(window, tool);
-    // Web pages and MCP results are other people's content: their example keys are not yours.
-    return (text, ts, category) => {
-      if (ts >= from && ts <= o.end && category !== 'Web' && category !== 'MCP')
-        scanner.toolOutput(text, tool);
-    };
-  });
+  const scans = await scan(
+    discovery,
+    o.tools,
+    (tool) => {
+      const from = observedWindowStart(window, tool);
+      // Web pages and MCP results are other people's content: their example keys are not yours.
+      return (text, ts, category) => {
+        if (ts >= from && ts <= o.end && category !== 'Web' && category !== 'MCP')
+          scanner.toolOutput(text, tool);
+      };
+    },
+    (tool) => io.progress?.(`Reading ${TOOL_NAMES[tool]}`),
+  );
   const sessions = scans.flatMap((s) => s.result.sessions);
   const forensics = checkFiles(scans.flatMap((s) => s.fileFacts));
   const kept = withoutExcluded(sessions, forensics);
@@ -205,7 +234,12 @@ async function read(
     report,
     sessions,
     kept,
-    tools: scans.map((s) => ({ tool: s.tool, found: s.found, readable: s.readable })),
+    tools: scans.map((s) => ({
+      tool: s.tool,
+      found: s.found,
+      readable: s.readable,
+      ...(s.unreadable ? { unreadable: s.unreadable } : {}),
+    })),
     forensics,
     context,
     scanMs,
@@ -311,27 +345,32 @@ async function goOnline(origin: Origin, installId: string, code: string, io: Io)
 }
 
 /** The deep read: the packet is built in memory, sent once and dropped. */
-async function sendDeepRead(api: Api, token: string, packet: Packet, io: Io): Promise<boolean> {
+async function sendDeepRead(
+  api: Api,
+  token: string,
+  packet: Packet,
+  io: Io,
+  agent: boolean,
+): Promise<DeepReadEnd> {
   const clock = io.clock ?? Date.now;
   const sleep = io.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const deadline = clock() + DEEP_READ_WAIT_MS;
+  const deadline = clock() + (agent ? DEEP_READ.waitMs.agent : DEEP_READ.waitMs.terminal);
   // The route answers 429 with a Retry-After while its readers are busy, and the client tries
   // again until its time is up. Any other refusal, the daily limit among them, ends it at once.
+  // In agent mode this loop is the only one, so the minute holds.
   for (;;) {
     try {
-      await api.sendDeepRead(token, packet);
-      return true;
+      await api.sendDeepRead(token, packet, agent ? 0 : undefined);
+      return 'sent';
     } catch (error) {
-      if (
-        error instanceof ApiError &&
-        error.status === 429 &&
-        error.retryAfterMs !== undefined &&
-        clock() < deadline
-      ) {
-        await sleep(Math.max(DEEP_READ_RETRY_MS, error.retryAfterMs));
+      if (error instanceof ApiError && error.status === 429 && error.retryAfterMs !== undefined) {
+        const wait = Math.max(DEEP_READ.retryMs, error.retryAfterMs);
+        if (clock() + wait > deadline) return 'busy';
+        io.progress?.('Deep read: the readers are busy, trying again');
+        await sleep(wait);
         continue;
       }
-      return false;
+      return 'failed';
     }
   }
 }
@@ -379,8 +418,14 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
     ? { color: false, truecolor: false }
     : (io.style ?? detectStyle(env, process.stdout.isTTY === true));
   const config = loadConfig(configDir(env));
-  const say = (lines: string[]) => io.out(lines.join('\n'));
+  // A progress line a terminal shows in place goes before anything else is printed.
+  const settle = () => io.progress?.(null);
+  const say = (lines: string[]) => {
+    settle();
+    io.out(lines.join('\n'));
+  };
   const stop = (message: string, exitCode: number) => {
+    settle();
     if (options.agent) io.out(renderAgentStop(VERSION, message));
     else io.out(message);
     return exitCode;
@@ -406,6 +451,7 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
         `Using ${origin.host}, not agentgpa.dev: this run is report only, and the deep read is off.`,
       );
     }
+    io.progress?.(`Checking ${origin.host}`);
     online = await goOnline(origin, config.installId, options.code, io);
     if ('stop' in online) return stop(online.stop, online.exitCode);
     if ('paused' in online) {
@@ -433,6 +479,7 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
     io,
     env,
   );
+  settle();
   const readSeconds = scanned.scanMs / 1000;
   const { report } = scanned;
   const hasPrompts = report.metrics.userPrompts > 0;
@@ -529,12 +576,15 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
     runToken: token.runToken,
     report: sent,
   });
+  // The code is spent once the run started: every way back is a new code.
+  const again = `Make a new code on ${origin.host}/start and run the new command`;
   if (gzipSync(JSON.stringify(payload)).length > MAX_UPLOAD_BYTES) {
     return stop(
-      'This report is larger than the server takes (1 MB gzipped). Make a new code and run it with --since 30d.',
+      `This report is larger than the server takes (1 MB gzipped). ${again} with --since 30d. A 30-day run cannot be your entrance exam.`,
       1,
     );
   }
+  io.progress?.('Sending');
   const sendStarted = clock();
   let accepted: Awaited<ReturnType<Api['upload']>>;
   try {
@@ -544,23 +594,12 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
       error instanceof ApiError
         ? `the server answered ${error.status}`
         : 'the server could not be reached';
-    return stop(
-      `The report did not go through: ${why}. Run the same command again in a few minutes.`,
-      1,
-    );
+    return stop(`The report did not go through: ${why}. ${again}.`, 1);
   }
   const sentSeconds = (clock() - sendStarted) / 1000;
-  let deepReadSent = false;
-  if (consents.deepRead && accepted.deepReadToken) {
-    deepReadSent = await sendDeepRead(
-      api,
-      accepted.deepReadToken,
-      packetFor(scanned, config.installId, options.code),
-      io,
-    );
-  }
   const page = reportUrl(accepted.reportUrl, origin) ?? reportUrl('/start', origin);
   if (!page) return stop(`Sent. Your report is ready at ${origin.host}/start.`, 0);
+  const deepReadToken = consents.deepRead ? accepted.deepReadToken : undefined;
   const done = {
     version: VERSION,
     handle: token.account?.handle,
@@ -571,19 +610,34 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
     sentSeconds,
     quotes: payload.quotes.length,
     consents,
-    deepReadSent,
+    deepRead: deepReadToken ? 'next' : consents.deepRead ? 'not sent' : 'off',
     page,
     opened: false,
-  };
+  } as const;
+  // The report first: its address, and the browser, before the deep read, which can wait.
   if (options.agent) {
     const text = renderAgentRun({
       ...done,
       ...(origin.isDefault ? {} : { customHost: origin.host }),
     });
+    settle();
     io.out(text.length > AGENT_OUTPUT_LIMIT ? text.slice(0, AGENT_OUTPUT_LIMIT) : text);
-    return 0;
+  } else {
+    const opened = (io.open ?? ((u) => openInBrowser(u, env, platform)))(page);
+    say(renderRunDone({ ...done, opened }, style));
   }
-  const opened = (io.open ?? ((u) => openInBrowser(u, env, platform)))(page);
-  say(renderRunDone({ ...done, opened }, style));
+  if (!deepReadToken) return 0;
+  io.progress?.('Sending the deep read');
+  const deepStarted = clock();
+  const deepEnd = await sendDeepRead(
+    api,
+    deepReadToken,
+    packetFor(scanned, config.installId, options.code),
+    io,
+    options.agent === true,
+  );
+  settle();
+  if (options.agent) io.out(renderAgentDeepRead(deepEnd));
+  else say(renderDeepRead(deepEnd, (clock() - deepStarted) / 1000, style));
   return 0;
 }

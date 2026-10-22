@@ -7,7 +7,7 @@ import {
   type Tool,
   type ToolCategory,
 } from '@agentgpa/core';
-import { readCursorDatabase } from './cursorDb.ts';
+import { type CursorUnreadable, readCursorDatabase } from './cursorDb.ts';
 import type { Discovery } from './discover.ts';
 import { readLines } from './read.ts';
 
@@ -18,6 +18,8 @@ export interface ToolScan {
   tool: Tool;
   found: boolean;
   readable: boolean;
+  /** Why a tool that was found could not be read, so the screen can name the fix. */
+  unreadable?: CursorUnreadable;
   files: Record<string, number>;
   bytes: number;
   ms: number;
@@ -56,9 +58,12 @@ export async function scan(
   discovery: Discovery,
   tools: readonly Tool[],
   onToolOutput?: ToolOutputHook,
+  /** Each tool as its reading starts, for the progress line. */
+  onStart?: (tool: Tool) => void,
 ): Promise<ToolScan[]> {
   const out: ToolScan[] = [];
   for (const tool of tools) {
+    onStart?.(tool);
     const started = performance.now();
     const hook = onToolOutput?.(tool);
     if (tool === 'claude-code')
@@ -128,11 +133,11 @@ async function codex(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, '
 
 async function cursor(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, 'ms'>> {
   const parser = createCursorParser(options(hook));
-  let readable = true;
+  let unreadable: CursorUnreadable | undefined;
   let bytes = 0;
   for (const db of discovery.cursor.databases) {
     const result = await readCursorDatabase(db, parser);
-    if (!result.readable) readable = false;
+    if (!result.readable) unreadable ??= result.reason;
   }
   for (const file of discovery.cursor.transcripts) {
     const read = await readLines(file.path, (line) =>
@@ -144,7 +149,8 @@ async function cursor(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, 
   return {
     tool: 'cursor',
     found: discovery.cursor.found,
-    readable,
+    readable: unreadable === undefined,
+    ...(unreadable ? { unreadable } : {}),
     files: {
       database: discovery.cursor.databases.length,
       transcript: discovery.cursor.transcripts.length,

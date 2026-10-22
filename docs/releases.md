@@ -6,7 +6,7 @@ The CLI reads the most sensitive files on a developer's machine, so a release ha
 
 - Only the `release` workflow (`.github/workflows/release.yml`) publishes, and only from a signed, annotated tag `vX.Y.Z` that matches `packages/cli/package.json` and points at the commit being built. The maintainer approves each run in the `release` environment before anything is published.
 - The npm package is published through npm trusted publishing: the workflow proves who it is with a short-lived OIDC token, so no npm token exists anywhere, and npm attaches provenance that names the workflow run and the commit.
-- The package is one bundled file and its licenses: no dependencies and no install scripts (`scripts/check-pack.ts`), so `npx agentgpa` downloads nothing but this package.
+- The package is one bundled file, its licenses and its README: no dependencies and no install scripts (`scripts/check-pack.ts`), so `npx agentgpa` downloads nothing but this package.
 - Two separate machines build the npm package, and each standalone build is built twice on its machine; the release stops unless the copies are byte for byte the same. No cache from an earlier run is used.
 - The standalone builds (macOS arm64 and x64, Linux x64, Windows x64) and the npm tarball are listed with their SHA-256 in `SHA256SUMS` on the GitHub release, and all of them carry a GitHub build attestation (SLSA provenance).
 

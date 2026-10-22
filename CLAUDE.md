@@ -56,7 +56,7 @@ Rules for agents and people working on the AgentGPA CLI and `@agentgpa/core`. Th
 - `pnpm install`
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`
 - `pnpm --filter agentgpa dev -- --help` (run the CLI from source)
-- `pnpm --filter agentgpa build`, then `node scripts/check-pack.ts` (the published bundle: one file and its licenses)
+- `pnpm --filter agentgpa build`, then `node scripts/check-pack.ts` (the published bundle: one file, its licenses and its README)
 - `pnpm --filter agentgpa standalone` (the standalone build for this machine, with its SHA-256)
 - `node scripts/bench-pow.ts` (times the proof-of-work solver on a hard 22-bit challenge; the budget is 5 seconds on 4 threads)
 - `node scripts/fixture-db.ts fixtures/home`, then `pnpm --filter agentgpa dev -- --dry-run --debug --root fixtures/home` (run it against the fixtures)

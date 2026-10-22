@@ -39,9 +39,10 @@ function text(value: Uint8Array | string | null): string {
     : Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('utf8');
 }
 
-export type CursorDbResult =
-  | { readable: true }
-  | { readable: false; reason: 'sqlite unavailable' | 'cannot open' | 'no chat tables' };
+/** Why Cursor's chats could not be read: each has its own fix on the screen. */
+export type CursorUnreadable = 'sqlite unavailable' | 'cannot open' | 'no chat tables';
+
+export type CursorDbResult = { readable: true } | { readable: false; reason: CursorUnreadable };
 
 /** Feeds the chat records of one `state.vscdb` to the parser. */
 export async function readCursorDatabase(

@@ -2,13 +2,18 @@ import { PAYLOAD_SCHEMA_VERSION } from '@agentgpa/core';
 import { Command } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 import { type Io, runScan, type ScanOptions } from './run.ts';
+import { progressLine } from './terminal.ts';
 
 /**
  * The agentgpa command: with the link code from agentgpa.dev/start, reads your sessions and sends
  * what you said yes to there. Your report is on the website; this command shows no result.
  */
 export function buildProgram(
-  io: Io = { out: (t) => console.log(t), err: (t) => console.error(t) },
+  io: Io = {
+    out: (t) => console.log(t),
+    err: (t) => console.error(t),
+    progress: progressLine(process.stderr, process.env),
+  },
 ): Command {
   const program = new Command('agentgpa')
     .description(
