@@ -60,6 +60,12 @@ export const METRIC_SCALARS = [
   'days',
 ] as const satisfies readonly (keyof Metrics)[];
 
+/**
+ * Metrics the server reads from the skeleton the payload already carries, which the payload's
+ * own metrics leave out, so a payload from any released CLI still parses.
+ */
+export const SKELETON_ONLY_METRICS = ['agentsAtOnce'] as const satisfies readonly (keyof Metrics)[];
+
 export const QUOTE_KINDS = [
   'most_repeated',
   'caps_crisis',

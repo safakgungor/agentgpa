@@ -12,6 +12,7 @@ import {
   PayloadSchema,
   type Report,
   type Session,
+  SKELETON_ONLY_METRICS,
   WireSkeletonSchema,
 } from '../src/index.ts';
 import { at, call, END, prompt, reply, session } from './build.ts';
@@ -82,7 +83,7 @@ describe('the payload', () => {
       .filter(([, v]) => typeof v === 'number')
       .map(([k]) => k)
       .sort();
-    expect(numeric).toEqual([...METRIC_SCALARS].sort());
+    expect(numeric).toEqual([...METRIC_SCALARS, ...SKELETON_ONLY_METRICS].sort());
   });
 
   it('refuses any field the schema does not list', () => {

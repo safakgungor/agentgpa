@@ -53,6 +53,11 @@ export interface Metrics {
   correctionCount: number;
   rageRepeatCount: number;
   maxParallelSessions: number;
+  /**
+   * The most sessions that each had a prompt and 3 or more tool calls inside one 15-minute
+   * window: agents working at the same time, not just open.
+   */
+  agentsAtOnce: number;
   longestRunMinutes: number;
   marathonCount: number;
   medianBlockMinutes: number;
@@ -113,6 +118,60 @@ export function activityBlocks(
 
 const duration = (b: { start: number; end: number }): number => b.end - b.start + 1;
 
+/** The index of the first value at least `x` in an ascending list. */
+function lowerBound(sorted: readonly number[], x: number): number {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((sorted[mid] as number) < x) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * The minutes from which one session is busy: a window of `width` minutes starting there holds
+ * at least `minPrompts` of its prompts and `minCalls` of its tool calls. Half-open runs of
+ * start minutes, ascending. A window's counts only change where an event enters or leaves it,
+ * so each run between those minutes is checked once.
+ */
+export function busyWindows(
+  prompts: readonly number[],
+  calls: readonly { minute: number; count: number }[],
+  width: number = R.atOnceWindowMinutes,
+  minPrompts: number = R.atOnceMinPrompts,
+  minCalls: number = R.atOnceMinToolCalls,
+): [number, number][] {
+  if (prompts.length < minPrompts || calls.length === 0) return [];
+  const p = [...prompts].sort((a, b) => a - b);
+  const c = [...calls].sort((a, b) => a.minute - b.minute);
+  const callMinutes = c.map((x) => x.minute);
+  const sums = [0];
+  for (const x of c) sums.push((sums.at(-1) as number) + x.count);
+  const edges = new Set<number>();
+  for (const m of [...p, ...callMinutes]) {
+    edges.add(m - width + 1);
+    edges.add(m + 1);
+  }
+  const starts = [...edges].sort((a, b) => a - b);
+  const runs: [number, number][] = [];
+  for (let i = 0; i < starts.length - 1; i++) {
+    const from = starts[i] as number;
+    const to = from + width;
+    const promptsIn = lowerBound(p, to) - lowerBound(p, from);
+    const callsIn =
+      (sums[lowerBound(callMinutes, to)] as number) -
+      (sums[lowerBound(callMinutes, from)] as number);
+    if (promptsIn < minPrompts || callsIn < minCalls) continue;
+    const next = starts[i + 1] as number;
+    const last = runs.at(-1);
+    if (last && last[1] === from) last[1] = next;
+    else runs.push([from, next]);
+  }
+  return runs;
+}
+
 export function computeMetrics(skeleton: Skeleton, timeZone: string): Metrics {
   const clock = localClock(timeZone);
   const start = Date.parse(skeleton.period.start);
@@ -158,6 +217,7 @@ export function computeMetrics(skeleton: Skeleton, timeZone: string): Metrics {
 
   const sessionMinutes = skeleton.sessions.map(() => [] as number[]);
   const sessionPrompts = skeleton.sessions.map(() => [] as PromptRow[]);
+  const sessionCalls = skeleton.sessions.map(() => [] as { minute: number; count: number }[]);
   const datesByTool = new Map<Tool, Set<string>>();
   const allDates = new Set<string>();
   const hourly = new Array<number>(24).fill(0);
@@ -258,6 +318,7 @@ export function computeMetrics(skeleton: Skeleton, timeZone: string): Metrics {
     const session = skeleton.sessions[s];
     if (!session) continue;
     sessionMinutes[s]?.push(minute);
+    sessionCalls[s]?.push({ minute, count });
     toolCalls += count;
     if (flags & CALL_FLAGS.sidechain) subagentToolCalls += count;
     if (flags & CALL_FLAGS.gitCommit) {
@@ -312,6 +373,21 @@ export function computeMetrics(skeleton: Skeleton, timeZone: string): Metrics {
     maxParallel = Math.max(maxParallel, running);
   }
 
+  // Agents at once: sessions busy in the same window, each with its own prompt and tool calls.
+  const busy: [number, number][] = [];
+  skeleton.sessions.forEach((_, s) => {
+    const prompts = (sessionPrompts[s] ?? []).map((p) => p[1]);
+    for (const [from, to] of busyWindows(prompts, sessionCalls[s] ?? []))
+      busy.push([from, 1], [to, -1]);
+  });
+  busy.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let working = 0;
+  let atOnce = 0;
+  for (const [, delta] of busy) {
+    working += delta;
+    atOnce = Math.max(atOnce, working);
+  }
+
   const sortedDates = [...allDates].sort();
   let streak = 0;
   let best = 0;
@@ -361,6 +437,7 @@ export function computeMetrics(skeleton: Skeleton, timeZone: string): Metrics {
     correctionCount: flagCount(PROMPT_FLAGS.correction),
     rageRepeatCount: flagCount(PROMPT_FLAGS.repeat),
     maxParallelSessions: maxParallel,
+    agentsAtOnce: atOnce,
     longestRunMinutes: maxOf(durations),
     marathonCount: durations.filter((d) => d >= R.marathonMinutes).length,
     medianBlockMinutes: median(durations),

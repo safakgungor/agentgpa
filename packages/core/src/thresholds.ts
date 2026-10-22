@@ -34,6 +34,14 @@ export const METRIC_RULES = {
   /** Each prompt's own language is named from its first characters, for prompts this long. */
   promptLanguageMinWords: 8,
   promptLanguageChars: 240,
+  /**
+   * Agents at once: the most sessions that each had at least atOnceMinPrompts prompts and
+   * atOnceMinToolCalls tool calls inside one window of atOnceWindowMinutes minutes, so an
+   * agent counts while it works, not while its window stays open.
+   */
+  atOnceWindowMinutes: 15,
+  atOnceMinPrompts: 1,
+  atOnceMinToolCalls: 3,
 } as const;
 
 export const SIGNAL_RULES = {

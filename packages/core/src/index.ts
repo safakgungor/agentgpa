@@ -52,6 +52,7 @@ export { compile, fold, LAUGH, LEXICONS, VAGUE_WORDS } from './lexicons.ts';
 export { countLines, patchLines } from './lines.ts';
 export {
   activityBlocks,
+  busyWindows,
   computeMetrics,
   type Metrics,
   secretsPer30,
@@ -86,6 +87,7 @@ export {
   type PayloadInput,
   PayloadSchema,
   QUOTE_KINDS,
+  SKELETON_ONLY_METRICS,
 } from './payload.ts';
 export { leadingZeroBits, type PowChallenge, PowChallengeSchema, powInput } from './pow.ts';
 export { PREVIEW_LINES, type PreviewLine, pickPreviewLines, type Tone } from './preview-lines.ts';

@@ -47,6 +47,7 @@ const maxed = context(
     interruptCount: 9999,
     correctionCount: 9999,
     maxParallelSessions: 99,
+    agentsAtOnce: 99,
     avgPromptWords: 999,
     shortPromptShare: 1,
     perTool: { 'claude-code': { ...emptyStats(), planned: 9999 } },

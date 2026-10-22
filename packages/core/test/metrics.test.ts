@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSkeleton,
+  busyWindows,
   CALL_FLAGS,
   computeMetrics,
   type Metrics,
@@ -168,6 +169,42 @@ describe('metrics', () => {
     ]);
     expectMetrics(m, { longestRunMinutes: 391, marathonCount: 1, maxParallelSessions: 3 });
     expect(m.longestStreakDays).toBe(1);
+  });
+
+  it('counts agents at once: sessions each with a prompt and 3 tool calls in one 15-minute window', () => {
+    const working = (tool: 'claude-code' | 'codex' | 'cursor', start: number, calls = 3) =>
+      session(tool, [
+        prompt(start, 'go'),
+        ...Array.from({ length: calls }, (_, i) => call(start + (i + 1) * 60_000, 'Read', 'Read')),
+      ]);
+    const m = metrics([
+      working('claude-code', at(2, 10)),
+      // Ten minutes later: one window of 15 holds both.
+      working('codex', at(2, 10, 10)),
+      // Half an hour later: no window holds it with the first two.
+      working('claude-code', at(2, 10, 30)),
+      // Open at the same time, but only a prompt, or only two tool calls: not working.
+      session('cursor', [prompt(at(2, 10, 5), 'just asking')]),
+      working('codex', at(2, 10, 6), 2),
+    ]);
+    expectMetrics(m, { agentsAtOnce: 2 });
+    // Their activity blocks never overlap, so the raw peak sees one session at a time.
+    expect(m.maxParallelSessions).toBe(1);
+  });
+
+  it('finds the minutes from which one session is busy', () => {
+    const calls = (...minutes: number[]) => minutes.map((minute) => ({ minute, count: 1 }));
+    // A prompt at 100 and calls at 101 to 103: windows from 89 to 100 hold all four.
+    expect(busyWindows([100], calls(101, 102, 103))).toEqual([[89, 101]]);
+    // A merged row counts for every call it stands for.
+    expect(busyWindows([100], [{ minute: 104, count: 3 }])).toEqual([[90, 101]]);
+    expect(busyWindows([100], calls(101, 102))).toEqual([]);
+    expect(busyWindows([], calls(1, 2, 3))).toEqual([]);
+    // Two busy stretches an hour apart stay two runs.
+    expect(busyWindows([0, 60], calls(1, 2, 3, 61, 62, 63))).toEqual([
+      [-11, 1],
+      [49, 61],
+    ]);
   });
 
   it('counts streaks, abandoned sessions and plan sessions per tool', () => {
