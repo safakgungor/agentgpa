@@ -8,7 +8,7 @@ import { type DeepReadEnd, fixLines, type RunDone } from './screens.ts';
 export const AGENT_OUTPUT_LIMIT = 8000;
 
 const TOOL_NAMES = { 'claude-code': 'Claude Code', codex: 'Codex', cursor: 'Cursor' } as const;
-const NO_PEEKING = 'Do not open or read the session files yourself.';
+export const NO_PEEKING = 'Do not open or read the session files yourself.';
 
 export function renderAgentRun(v: Omit<RunDone, 'opened'> & { customHost?: string }): string {
   const host = v.page.host;

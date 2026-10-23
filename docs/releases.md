@@ -9,6 +9,7 @@ The CLI reads the most sensitive files on a developer's machine, so a release ha
 - The package is one bundled file, its licenses and its README: no dependencies and no install scripts (`scripts/check-pack.ts`), so `npx agentgpa` downloads nothing but this package.
 - Two separate machines build the npm package, and each standalone build is built twice on its machine; the release stops unless the copies are byte for byte the same. No cache from an earlier run is used.
 - The standalone builds (macOS arm64 and x64, Linux x64, Windows x64) and the npm tarball are listed with their SHA-256 in `SHA256SUMS` on the GitHub release, and all of them carry a GitHub build attestation (SLSA provenance).
+- npm attaches provenance, and GitHub makes build attestations, only for a public repository. The releases made while this repository was private (0.1.0 to 0.1.2) have neither, since the workflow reads the repository's visibility and leaves both out; their `SHA256SUMS` and the reproducible build below still let you check them.
 
 ## How to check one
 
@@ -25,4 +26,4 @@ To rebuild a release yourself, check out its tag and run `pnpm install --frozen-
 
 ## When a release is bad
 
-A version with a bug that matters is revoked: when online, the CLI asks the server about its version, and a revoked version says why and refuses to upload. On npm it is deprecated and `latest` moves back to the last good version, and a security issue gets a GitHub security advisory. See [SECURITY.md](../SECURITY.md) to report one.
+A version with a bug that matters is revoked: when online, the CLI asks the server about its version, and a revoked version says it can no longer send and refuses to upload. On npm it is deprecated and `latest` moves back to the last good version, and a security issue gets a GitHub security advisory. See [SECURITY.md](../SECURITY.md) to report one.

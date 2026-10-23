@@ -33,7 +33,7 @@ export function debugReport(scans: ToolScan[], options: ReportOptions): string {
     );
     if (!s.found) continue;
     lines.push(
-      `  files: ${top(s.files, 5)} (${n(Math.round(s.bytes / 1_048_576))} MB) in ${n(Math.round(s.ms))} ms`,
+      `  files: ${top(s.files, 5)} (${n(Math.round(s.bytes / 1_048_576))} MB) in ${n(Math.round(s.ms))} ms${s.skipped ? `, ${n(s.skipped)} unreadable and skipped` : ''}`,
     );
     lines.push(
       `  records: ${n(st.lines)} read, ${n(st.malformed)} malformed and skipped, ${n(st.oversized)} over 8 MB skipped, ${n(st.duplicates)} duplicates dropped`,

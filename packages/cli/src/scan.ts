@@ -9,7 +9,7 @@ import {
 } from '@agentgpa/core';
 import { type CursorUnreadable, readCursorDatabase } from './cursorDb.ts';
 import type { Discovery } from './discover.ts';
-import { readLines } from './read.ts';
+import { type ReadResult, readLines } from './read.ts';
 
 // Reads every file discovery found and runs the pure parsers over it. Transcript text stays
 // in memory; nothing here writes, logs or sends it.
@@ -21,6 +21,8 @@ export interface ToolScan {
   /** Why a tool that was found could not be read, so the screen can name the fix. */
   unreadable?: CursorUnreadable;
   files: Record<string, number>;
+  /** Files that could not be read, moved or deleted while the scan ran; the rest still count. */
+  skipped: number;
   bytes: number;
   ms: number;
   result: ParseResult;
@@ -76,21 +78,38 @@ export async function scan(
 }
 
 type Hook = ((text: string, ts: number, category: ToolCategory | undefined) => void) | undefined;
+
+/** Reads one file, or undefined when it cannot be read, so one bad file never ends the scan. */
+async function readOrSkip(
+  path: string,
+  onLine: (line: string) => void,
+): Promise<ReadResult | undefined> {
+  try {
+    return await readLines(path, onLine);
+  } catch {
+    return undefined;
+  }
+}
 const options = (hook: Hook) => (hook ? { hash: sha256, onToolOutput: hook } : { hash: sha256 });
 
 async function claudeCode(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, 'ms'>> {
   const parser = createClaudeCodeParser(options(hook));
   const files: Record<string, number> = { main: 0, subagent: 0, 'workflow-agent': 0 };
   let bytes = 0;
+  let skipped = 0;
   const fileFacts: FileFact[] = [];
   for (const file of discovery.claude.files) {
     files[file.kind] = (files[file.kind] ?? 0) + 1;
     const target = { kind: file.kind, sessionId: file.sessionId };
     let newest = 0;
-    const read = await readLines(file.path, (line) => {
+    const read = await readOrSkip(file.path, (line) => {
       const ts = parser.line(line, target);
       if (ts !== undefined && ts > newest) newest = ts;
     });
+    if (!read) {
+      skipped++;
+      continue;
+    }
     bytes += read.bytes;
     parser.stats.oversized += read.oversized;
     fileFacts.push(fact('claude-code', file.sessionId, file.createdMs, newest));
@@ -100,6 +119,7 @@ async function claudeCode(discovery: Discovery, hook: Hook): Promise<Omit<ToolSc
     found: discovery.claude.found,
     readable: true,
     files,
+    skipped,
     bytes,
     result: parser.finish(),
     fileFacts,
@@ -109,13 +129,18 @@ async function claudeCode(discovery: Discovery, hook: Hook): Promise<Omit<ToolSc
 async function codex(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, 'ms'>> {
   const parser = createCodexParser(options(hook));
   let bytes = 0;
+  let skipped = 0;
   const fileFacts: FileFact[] = [];
   for (const file of discovery.codex.files) {
     let newest = 0;
-    const read = await readLines(file.path, (line) => {
+    const read = await readOrSkip(file.path, (line) => {
       const ts = parser.line(line, file.sessionId);
       if (ts !== undefined && ts > newest) newest = ts;
     });
+    if (!read) {
+      skipped++;
+      continue;
+    }
     bytes += read.bytes;
     parser.stats.oversized += read.oversized;
     fileFacts.push(fact('codex', file.sessionId, file.createdMs, newest));
@@ -125,6 +150,7 @@ async function codex(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, '
     found: discovery.codex.found,
     readable: true,
     files: { rollout: discovery.codex.files.length },
+    skipped,
     bytes,
     result: parser.finish(),
     fileFacts,
@@ -135,14 +161,19 @@ async function cursor(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, 
   const parser = createCursorParser(options(hook));
   let unreadable: CursorUnreadable | undefined;
   let bytes = 0;
+  let skipped = 0;
   for (const db of discovery.cursor.databases) {
     const result = await readCursorDatabase(db, parser);
     if (!result.readable) unreadable ??= result.reason;
   }
   for (const file of discovery.cursor.transcripts) {
-    const read = await readLines(file.path, (line) =>
+    const read = await readOrSkip(file.path, (line) =>
       parser.transcriptLine(file.composerId, line, file.birthtimeMs),
     );
+    if (!read) {
+      skipped++;
+      continue;
+    }
     bytes += read.bytes;
     parser.stats.oversized += read.oversized;
   }
@@ -155,6 +186,7 @@ async function cursor(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, 
       database: discovery.cursor.databases.length,
       transcript: discovery.cursor.transcripts.length,
     },
+    skipped,
     bytes,
     result: parser.finish(),
     // One database holds every chat, so the file checks do not apply to Cursor.

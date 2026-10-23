@@ -167,6 +167,34 @@ describe('the deep read packet', () => {
     expect(long.projects).toEqual(['z'.repeat(59)]);
   });
 
+  it('calls a folder private when it holds the account or host name, whatever joins the words', () => {
+    const named = (projectName: string) =>
+      session('codex', [prompt(at(1, 9), 'tidy up the readme for me please')], { projectName });
+    const folders = [
+      'jdoe-dotfiles',
+      'jdoe_notes',
+      'my-jdoe-site',
+      'JDOE.github.io',
+      'jdoe-mbp-backup',
+      'irem-blog',
+      'jdoes-app',
+      'mbp-tools',
+    ];
+    const p = packetOf(folders.map(named), {
+      context: { ...context, names: ['jdoe', 'jdoe-mbp', 'İrem', 'mb'] },
+    });
+    expect(p.sessions.map((s) => p.projects[s.project ?? -1])).toEqual([
+      PRIVATE_FOLDER,
+      PRIVATE_FOLDER,
+      PRIVATE_FOLDER,
+      PRIVATE_FOLDER,
+      PRIVATE_FOLDER,
+      PRIVATE_FOLDER,
+      'jdoes-app',
+      'mbp-tools',
+    ]);
+  });
+
   it("leaves out the agent's own session and refuses any field it does not list", () => {
     const p = packetOf(
       [session('codex', [prompt(at(1), 'run npx -y agentgpa --agent --code K7Q3-PX9M please')])],

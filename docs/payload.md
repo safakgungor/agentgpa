@@ -4,10 +4,12 @@ Two things can leave your machine: the **payload** (what your report is made fro
 
 You say yes on agentgpa.dev/start, before anything is read: the page shows what a run sends, lets you turn research aggregates off and the deep read on, and asks you to agree to the terms. Then it gives you a one-time link code, which carries those choices, and the command to run with it.
 
-The CLI prints no grades, quotes or findings, in your terminal or in your agent: your report is on the website. Before you say yes, or any time after, you can see exactly what would be sent, without a code and without any network call:
+The CLI prints no grades, quotes or findings, in your terminal or in your agent: your report is on the website. Before you say yes, or any time after, you can see what a run would send, without a code and without any network call:
 
 - `agentgpa --dry-run` writes the payload to `agentgpa-payload.json` in the current folder. `agentgpa --json` prints it.
 - `agentgpa --show-packet` prints the deep read packet.
+
+The payload they show has research and the deep read off and no run token. A run in agent mode sends the same, minus the quote candidates agent mode leaves out (below). `--json` and `--show-packet` print your prompts, so agent mode refuses both.
 - `agentgpa --offline` says what it found and what a run would send.
 
 ## When the CLI talks to the network
@@ -17,11 +19,11 @@ Only a run with a link code talks to the network. Without a code, the CLI reads 
 | Request | When | What it sends |
 | --- | --- | --- |
 | `GET /api/cli/status` | At the start | The CLI version |
-| `POST /api/cli/runs` | At the start, before the scan | A random install id (from `~/.agentgpa/config.json`), the CLI version, the link code and the answer to a proof-of-work challenge. The answer binds the run to your account and tells the CLI your choices from /start; each code starts one run |
+| `POST /api/cli/runs` | At the start, before the scan (twice: once for the proof-of-work challenge, once with its answer) | A random install id (from `~/.agentgpa/config.json`), the CLI version, the link code and the answer to a proof-of-work challenge. The answer binds the run to your account and tells the CLI your choices from /start; each code starts one run |
 | `POST /api/cli/reports` | Right after the scan | The payload, gzipped, with the run token in a header |
-| `POST /api/cli/deep-read` | Right after the report, only when you turned the deep read on | The packet, gzipped |
+| `POST /api/cli/deep-read` | Right after the report, only when you turned the deep read on, and only ever to `https://agentgpa.dev` | The packet, gzipped |
 
-Then the CLI opens your report page in the browser (in agent mode, your agent tells you where it is), and the run is over.
+Right after the report is sent, the CLI opens your report page in the browser (in agent mode, your agent tells you where it is), then sends the deep read when you turned it on, and the run is over.
 
 ## The payload
 
@@ -62,7 +64,7 @@ The skeleton holds no text, no paths, no file names, no project names and no MCP
 
 A quote is your own prompt: one you repeat most, one in all caps, the saltiest, and up to two cryptic ones. Each is at most 120 characters. Swears are masked as `[[bar:N]]` (N letters), which cards draw as a bar, so the word itself never leaves. A prompt with anything else to redact (a secret, a random-looking string, an id, an email, a phone number, an address, a home path, a project or account name) is never a quote, and neither is one with code. Each quote carries its kind, its local hour and weekday, the index of the prompt in the event log, so the server can check it against that prompt, and for the most repeated one how often it came up.
 
-The candidates reach the server private. Nobody sees one, on your own cards either, until you pick it on your report page, and the ones you do not pick are deleted once you have picked, or after 30 days. `--dry-run` and `--json` show exactly which candidates a run would send.
+The candidates reach the server private. Nobody sees one, on your own cards either, until you pick it on your report page, and the ones you do not pick are deleted once you have picked, or after 30 days. `--dry-run` and `--json` show which candidates a terminal run would send.
 
 In agent mode, quotes with a link, a path, a shell construct or wording aimed at an agent are left out, since old sessions can hold text written to steer agents.
 

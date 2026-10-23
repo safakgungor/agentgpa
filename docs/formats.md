@@ -84,7 +84,7 @@ Other prompt fields: `promptId`, `promptSource` (`sdk`, `system`), `permissionMo
 - Usage is repeated on every block line of a reply (above).
 - Huge lines: tool results with base64 images and attachments with file contents reach tens of MB. Lines over 8 MB are skipped without parsing and counted; none of them is a prompt.
 - Text that is not a prompt: `last-prompt`, `queue-operation` (`content`), attachments and titles hold copies of prompt text.
-- Personal data in lines: `cwd`, `gitBranch`, file paths, the account email in some attachments, MCP server names and PR URLs. The CLI never sends any of them; the project is reduced to a hash of `cwd`.
+- Personal data in lines: `cwd`, `gitBranch`, file paths, the account email in some attachments, MCP server names and PR URLs. The CLI never sends any of them; the project is reduced to a hash of `cwd`, and only the deep read, when you turn it on, sends the last part of `cwd` (the folder's own name, never the path).
 
 ## Codex
 
@@ -197,7 +197,7 @@ Before the skeleton is built, the CLI compares each Claude Code and Codex sessio
 
 ## Scan time
 
-Measured with `agentgpa --dry-run --debug` on an Apple Silicon Mac with Node 22, October 2026, on a history of a few gigabytes from all three tools: transcripts are read at about 380 MB a second, every line parsed and validated. Lines over 8 MB are skipped while they are read, so they cost no parsing. Metrics, secret detection, grading and the preview add less than a fifth to that time, and peak memory stays under 600 MB. The target is 1 GB in under 15 seconds and a heavy 90-day history in under 40 seconds.
+Measured with `agentgpa --dry-run --debug` on an Apple Silicon Mac with Node 22, October 2026, on a history of a few gigabytes from all three tools: transcripts are read at about 380 MB a second, every line parsed and validated. Lines over 8 MB are skipped while they are read, so they cost no parsing. Metrics, secret detection and grading add less than a fifth to that time, and peak memory stays under 600 MB. The target is 1 GB in under 15 seconds and a heavy 90-day history in under 40 seconds.
 
 ## Fixtures
 

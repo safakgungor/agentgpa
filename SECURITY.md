@@ -26,4 +26,4 @@ The published CLI has no runtime dependencies: everything it runs is bundled at 
 
 ## Supported versions
 
-Only the latest release of the CLI is supported. A revoked release explains why and refuses to upload.
+Only the latest release of the CLI is supported. A revoked release says it can no longer send and refuses to upload.

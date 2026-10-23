@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import { cleanText } from './clean.ts';
 import { LANG_CATEGORIES, type LangCategory } from './files.ts';
+import { fold } from './lexicons.ts';
 import { maskSwears, type RedactionContext, redact } from './redaction.ts';
 import { CATEGORIES, observedWindowStart } from './skeleton.ts';
 import { hasCodeBlock, looksPastedError, wordCount } from './text.ts';
-import { PACKET_RULES as R } from './thresholds.ts';
+import { PACKET_RULES as R, REDACTION_RULES } from './thresholds.ts';
 import { type Session, TOOL_FLAGS, type Tool, type ToolCategory } from './types.ts';
 import { ToolSchema } from './wire.ts';
 
@@ -109,6 +110,24 @@ export const PacketSchema = z
     'an index points past its list',
   );
 
+/** A name's words: runs of letters and digits, with case and the Turkish I folded. */
+const wordsOf = (text: string): string[] =>
+  fold(text)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+
+/**
+ * Whether a folder name holds an account or host name as whole words, whatever joins them:
+ * jdoe-dotfiles, my_jdoe_site and jdoe-mbp-backup all hold jdoe or jdoe-mbp.
+ */
+function holdsName(name: string, names: readonly string[]): boolean {
+  const label = ` ${wordsOf(name).join(' ')} `;
+  return names.some((n) => {
+    const words = n.length >= REDACTION_RULES.minNameLength ? wordsOf(n) : [];
+    return words.length > 0 && label.includes(` ${words.join(' ')} `);
+  });
+}
+
 /**
  * The name a session's project folder gets in the packet: the folder's own name, cleaned, or a
  * stand-in when it would give away more than the project. None when the tool recorded no folder.
@@ -124,7 +143,12 @@ export function projectLabel(
   if (!name) return undefined;
   // The name itself is what we send, so only the other placeholders apply to it.
   const redacted = redact(name, { ...options.context, projects: [] });
-  if (redacted.kinds.length > 0 || redacted.text !== name || maskSwears(name) !== name)
+  if (
+    redacted.kinds.length > 0 ||
+    redacted.text !== name ||
+    maskSwears(name) !== name ||
+    holdsName(name, options.context.names)
+  )
     return PRIVATE_FOLDER;
   // Cut by whole characters, within the schema's length in UTF-16 units.
   let out = '';

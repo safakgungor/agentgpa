@@ -6,7 +6,7 @@ How AgentGPA turns the sessions on your machine into a report card. All of it li
 
 The period is the last 90 days by default (`--since 7d`, `14d` or `30d` for shorter reports), counted back from the moment of the scan.
 
-Every tool counts the whole period. Claude Code deletes a transcript once it has gone unchanged for its `cleanupPeriodDays` setting (30 days unless you changed it), but a session file it keeps, for example one you came back to, still holds its older events, and those count like any other. Codex and Cursor keep everything. A tool's **observed days** are the days of the period it is counted over: the whole period for every tool. (Until 0.1.0, Claude Code's were `min(period, cleanupPeriodDays)`.)
+Every tool counts the whole period. Claude Code deletes a transcript once it has gone unchanged for its `cleanupPeriodDays` setting (30 days unless you changed it), but a session file it keeps, for example one you came back to, still holds its older events, and those count like any other. Codex and Cursor keep everything. A tool's **observed days** are the days of the period it is counted over: the whole period for every tool. (Before 0.1.1, Claude Code's were `min(period, cleanupPeriodDays)`.)
 
 - Events older than the period are left out of every metric.
 - Attendance compares active days with observed days for each tool, so days whose sessions Claude Code already deleted count as days without work.
@@ -81,7 +81,7 @@ Fewer than 20 prompts or fewer than 3 active days: no GPA. The card still shows 
 ## Honors and Detention
 
 - **Dean's List**: GPA 3.7 or higher. **Academic Probation**: GPA under 2.0.
-- **Detention**: a secret was pasted into a prompt or read by your agent. The card shows only the count. `agentgpa --details` shows the types and how to keep secrets out of your agent's reach, on your machine only.
+- **Detention**: a secret was pasted into a prompt or read by your agent. The card shows only the count; the payload carries the counts by type and tool, never a value.
 
 ## Secret detection
 

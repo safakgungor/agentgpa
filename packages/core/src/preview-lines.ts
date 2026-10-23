@@ -3,10 +3,11 @@ import type { Signals } from './signals.ts';
 import type { DeviceFacts } from './skeleton.ts';
 import { METRIC_RULES as R } from './thresholds.ts';
 
-// The terminal preview's three funny lines: a small public set with fixed triggers that need
-// no population data. At most one roast, never two from the same family, never a percentage of
-// developers. Strength decides the order, and a hash of the install id breaks ties and nudges
-// close calls, so two people with the same numbers can still see different lines.
+// A report's three funny lines, which the CLI no longer prints: a small public set with fixed
+// triggers that need no population data. At most one roast, never two from the same family,
+// never a percentage of developers. Strength decides the order, and a hash of the install id
+// breaks ties and nudges close calls, so two people with the same numbers can still see
+// different lines.
 
 export type Tone = 'brag' | 'roast' | 'wholesome' | 'weird';
 

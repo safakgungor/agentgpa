@@ -94,8 +94,9 @@ export interface Session {
   /** A hash of the project path, never the path itself. */
   projectKey: string;
   /**
-   * The project folder's name, kept in memory only so redaction can take it out of quotes and
-   * the deep read. It never reaches the skeleton or the payload.
+   * The project folder's name, kept in memory so redaction can take it out of quotes and the
+   * deep read's prompts. It never reaches the skeleton or the payload; the deep read packet
+   * carries it only as `projectLabel` makes it.
    */
   projectName?: string;
   startedAt: number;

@@ -1,4 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PayloadSchema } from '@agentgpa/core';
@@ -101,6 +110,32 @@ describe('agentgpa --dry-run', () => {
     expect(payload.consents).toEqual({ researchAggregates: false, deepRead: false });
     expect(payload.client.root).toBe('custom');
     expect(out.join('\n')).toMatch(/Dry run: wrote agentgpa-payload.json \(\d+ KB gzipped/);
+  });
+
+  it('replaces a file or link planted at its name, and never writes through the link', async () => {
+    if (process.platform === 'win32') return;
+    const root = await fixtureHome();
+    const dir = mkdtempSync(join(tmpdir(), 'agentgpa-dry-'));
+    const target = join(dir, 'elsewhere.txt');
+    writeFileSync(target, 'keep me', { mode: 0o644 });
+    symlinkSync(target, join(dir, 'agentgpa-payload.json'));
+    const code = await runScan(
+      { dryRun: true, root, since: '90d' },
+      {
+        out: () => {},
+        err: () => {},
+        now: Date.UTC(2027, 9, 20),
+        env: { AGENTGPA_CONFIG_DIR: CONFIG },
+        cwd: dir,
+      },
+    );
+    expect(code).toBe(0);
+    const path = join(dir, 'agentgpa-payload.json');
+    expect(lstatSync(path).isSymbolicLink()).toBe(false);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(target, 'utf8')).toBe('keep me');
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+    expect(readdirSync(dir).sort()).toEqual(['agentgpa-payload.json', 'elsewhere.txt']);
   });
 
   it("says when it read the tools' default locations, without naming any folder", async () => {

@@ -1,4 +1,5 @@
-import { chmodSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { renameSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -324,7 +325,7 @@ async function goOnline(origin: Origin, installId: string, code: string, io: Io)
   if (!status) return { stop: `Couldn't reach ${origin.host}, so nothing was read.`, exitCode: 1 };
   if (status.revoked || versionBelow(VERSION, status.minimum)) {
     return {
-      stop: `This version can no longer send. Run npx agentgpa@${status.current} with the same code.`,
+      stop: `This version can no longer send. Run version ${status.current} with the same code: /start shows the command.`,
       exitCode: 1,
     };
   }
@@ -394,9 +395,17 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
     io.err('--code takes the 8-character link code from /start, like K7Q3-PX9M.');
     return 2;
   }
+  // These print what a run would send, prompts and quote candidates included, which agent mode
+  // never hands to an agent.
   if (options.showPacket && options.agent) {
     io.err(
       '--show-packet prints prompts, so it only runs in your own terminal, never with --agent.',
+    );
+    return 2;
+  }
+  if (options.json && options.agent) {
+    io.err(
+      '--json prints the quote candidates, so it only runs in your own terminal, never with --agent.',
     );
     return 2;
   }
@@ -525,8 +534,11 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
     });
     const json = JSON.stringify(payload, null, 2);
     const path = join(typedIn, 'agentgpa-payload.json');
-    writeFileSync(path, `${json}\n`, { mode: 0o600 });
-    chmodSync(path, 0o600);
+    // A new file of the user's alone, renamed over any old one: a link planted at that name is
+    // replaced, never followed.
+    const fresh = join(typedIn, `.agentgpa-payload-${randomBytes(6).toString('hex')}.json`);
+    writeFileSync(fresh, `${json}\n`, { mode: 0o600, flag: 'wx' });
+    renameSync(fresh, path);
     const kb = Math.ceil(gzipSync(json).length / 1024);
     io.out(
       `Dry run: wrote agentgpa-payload.json (${kb} KB gzipped, ${payload.quotes.length} ${payload.quotes.length === 1 ? 'quote' : 'quotes'}). It has no run token, so it can never rank. Nothing was sent.`,

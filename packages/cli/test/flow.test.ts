@@ -405,9 +405,12 @@ describe('the agent flow', () => {
     expect(seen.status + seen.runs).toBe(0);
   });
 
-  it('refuses --show-packet in agent mode and a malformed link code', async () => {
+  it('refuses --show-packet and --json in agent mode, and a malformed link code', async () => {
     const t = io();
     expect(await runScan({ agent: true, showPacket: true }, t.io)).toBe(2);
+    expect(await runScan({ agent: true, json: true }, t.io)).toBe(2);
+    expect(t.out.join('\n')).toContain('--json prints the quote candidates');
     expect(await runScan({ code: 'nope' }, t.io)).toBe(2);
+    expect(seen.status + seen.runs).toBe(0);
   });
 });
