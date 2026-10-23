@@ -2,7 +2,7 @@
 
 Your agent graded you.
 
-AgentGPA grades how you work with your coding agents (Claude Code, Codex and Cursor) in seven courses and gives you a GPA. This repository holds the CLI, which reads the agent sessions on your machine, and `@agentgpa/core`, the code that reads, measures, grades and redacts, so you can check exactly what happens to your sessions. Your report and the boards (world, country, campus and tool tribes, for fun and self-reported) are on the website, a separate service.
+AgentGPA grades how you work with your coding agents (Claude Code, Codex and Cursor) in seven courses and gives you a GPA. This repository holds the CLI, which reads the agent sessions on your machine, and `@agentgpa/core`, the code that reads, measures, grades and redacts, so you can check exactly what happens to your sessions. Your report and the boards (world, country, campus and tool tribes) are on the website, a separate service.
 
 **Status:** in development. Nothing is published yet.
 
