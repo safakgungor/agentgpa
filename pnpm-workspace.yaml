@@ -4,6 +4,12 @@ packages:
 # Supply chain: install only versions published at least 14 days ago.
 minimumReleaseAge: 20160
 
+# A fix for a high advisory ships within 7 days (SECURITY.md): zod 4.6.5 and older can exhaust
+# memory while validating oversized constrained collections (GHSA-mrhx-c7xc-m3w5), and 4.6.6 is
+# 12 days old on 2026-10-23. It comes out of this list on 2026-10-25, when 4.6.6 is 14 days old.
+minimumReleaseAgeExclude:
+  - zod
+
 # No dependency runs an install script. esbuild's only speeds up its own start, and it works
 # without it.
 allowBuilds:
