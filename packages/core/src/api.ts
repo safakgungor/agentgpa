@@ -77,6 +77,11 @@ export const ReportAcceptedSchema = z.object({
   reportUrl: z.url(),
   /** Single use, only when the owner said yes to the deep read on /start. */
   deepReadToken: token.optional(),
+  /**
+   * The /start page the owner made the code on asked for it moments ago: the report comes back
+   * to that page, so no second tab opens. Older servers leave it out, and older CLIs drop it.
+   */
+  watched: z.boolean().optional(),
 });
 export type ReportAccepted = z.infer<typeof ReportAcceptedSchema>;
 

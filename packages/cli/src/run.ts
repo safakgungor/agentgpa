@@ -634,6 +634,9 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
     });
     settle();
     io.out(text.length > AGENT_OUTPUT_LIMIT ? text.slice(0, AGENT_OUTPUT_LIMIT) : text);
+  } else if (accepted.watched === true) {
+    // The page the owner made the code on follows the run itself: no second tab.
+    say(renderRunDone({ ...done, watched: true }, style));
   } else {
     const opened = (io.open ?? ((u) => openInBrowser(u, env, platform)))(page);
     say(renderRunDone({ ...done, opened }, style));

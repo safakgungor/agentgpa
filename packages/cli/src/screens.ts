@@ -125,6 +125,8 @@ export interface RunDone {
   deepRead: DeepReadNext;
   page: URL;
   opened: boolean;
+  /** The page the owner made the code on follows the run, so no browser was opened. */
+  watched?: boolean;
 }
 
 const DEEP_READ_LINE: Record<DeepReadNext, string> = {
@@ -136,7 +138,10 @@ const DEEP_READ_LINE: Record<DeepReadNext, string> = {
 /** The last line of a run, once nothing more will leave. */
 const NOTHING_ELSE = 'Nothing else left this machine.';
 
-/** A run with a code, once it was sent: what was read and sent, and where the report is. */
+/**
+ * A run with a code, once it was sent: what was read and sent, and where the report is: the page
+ * it opened, or the one the owner started from when that page follows the run itself.
+ */
 export function renderRunDone(o: RunDone, style: Style): string[] {
   const c = canvas(style);
   const shown = `${o.page.host}${o.page.pathname}`;
@@ -174,10 +179,12 @@ export function renderRunDone(o: RunDone, style: Style): string[] {
     c.row([['YOUR REPORT IS READY', 'accb']], [['ONE CLICK LEFT', 'dim']]),
     c.rule('├', '┤'),
     c.row(),
-    c.row([
-      [shown, 'hi'],
-      [o.opened ? '  opened in your browser' : '  open it in your browser', 'dim'],
-    ]),
+    o.watched
+      ? c.row([[`It is waiting on the ${o.page.host} page you started from.`, '']])
+      : c.row([
+          [shown, 'hi'],
+          [o.opened ? '  opened in your browser' : '  open it in your browser', 'dim'],
+        ]),
     c.row(),
     c.row([['Your grades, your cards and what we found are there, not here.', '']]),
     c.row([['Confirm the run with one click to make it yours.', '']]),

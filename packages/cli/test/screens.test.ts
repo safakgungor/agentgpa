@@ -47,3 +47,39 @@ describe('an unreadable Cursor', () => {
     expect(renderAgentRun(done)).toContain('Cursor: update Node');
   });
 });
+
+describe('the run box', () => {
+  const done = {
+    version: '0.1.3',
+    tools,
+    sessions: 55,
+    days: 90,
+    readSeconds: 1,
+    sentSeconds: 1,
+    quotes: 3,
+    consents: { researchAggregates: true, deepRead: false },
+    deepRead: 'off' as const,
+    page: new URL('https://agentgpa.dev/start'),
+    opened: true,
+  };
+
+  it('names the page it opened', () => {
+    const text = renderRunDone(done, plain).join('\n');
+    expect(text).toContain('[agentgpa.dev/start]  opened in your browser');
+    expect(renderRunDone({ ...done, opened: false }, plain).join('\n')).toContain(
+      'open it in your browser',
+    );
+  });
+
+  it('points to the page the owner started from when that page follows the run', () => {
+    for (const style of [plain, { color: true, truecolor: true }]) {
+      const text = renderRunDone({ ...done, opened: false, watched: true }, style).join('\n');
+      expect(text).toContain('It is waiting on the agentgpa.dev page you started from.');
+      // The page's address shows once, where the yes was given, and no browser was opened.
+      expect(text.split('agentgpa.dev/start')).toHaveLength(2);
+      expect(text).toContain('Sent what you said yes to on agentgpa.dev/start');
+      expect(text).not.toContain('in your browser');
+      expect(text).toContain('Confirm the run with one click to make it yours.');
+    }
+  });
+});

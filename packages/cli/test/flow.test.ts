@@ -47,6 +47,8 @@ let mode: {
    * without one.
    */
   deepRead?: 'busy' | 'swamped' | 'limit';
+  /** The reports route says the /start page that made the code follows the run. */
+  watched?: boolean;
 };
 /** Codes that already started a run: each works once. */
 let used: Set<string>;
@@ -112,6 +114,7 @@ beforeAll(async () => {
         return send(res, 202, {
           reportUrl: `${base}/start`,
           ...(payload.consents.deepRead ? { deepReadToken: 'deep-read-token-aaaaaaaaaa' } : {}),
+          ...(mode.watched === undefined ? {} : { watched: mode.watched }),
         });
       }
       if (req.method === 'POST' && path === '/api/cli/deep-read') {
@@ -266,6 +269,32 @@ describe('a run with a code from /start', () => {
     );
   });
 
+  it('opens no second tab when the page the code came from follows the run', async () => {
+    mode.watched = true;
+    mode.consents = { researchAggregates: true, deepRead: true };
+    const root = await fixtureHome();
+    const t = io();
+    expect(await runScan({ root, code: CODE }, t.io)).toBe(0);
+    const text = t.out.join('\n');
+    expect(t.opened).toEqual([]);
+    expect(text).toContain(`It is waiting on the ${new URL(base).host} page you started from.`);
+    expect(text).not.toContain('in your browser');
+    expect(text).toContain('YOUR REPORT IS READY');
+    expectNoResults(text, seen.reports[0]);
+    // The deep read still follows the report, and the run ends as always.
+    expect(seen.packets).toHaveLength(1);
+    expect(text.endsWith('Nothing else left this machine.')).toBe(true);
+  });
+
+  it('opens the page as before when no page follows the run', async () => {
+    mode.watched = false;
+    const root = await fixtureHome();
+    const t = io();
+    expect(await runScan({ root, code: CODE }, t.io)).toBe(0);
+    expect(t.opened).toEqual([`${base}/start`]);
+    expect(t.out.join('\n')).toContain('opened in your browser');
+  });
+
   it('gives a spent code no second try: a failed upload asks for a new code', async () => {
     mode.reportStatus = 500;
     const root = await fixtureHome();
@@ -370,6 +399,17 @@ describe('the agent flow', () => {
     const payload = PayloadSchema.parse(seen.reports[0]);
     expect(payload.client.runMode).toBe('agent');
     expectNoResults(text, payload);
+  });
+
+  it('prints the same lines whether or not a page follows the run', async () => {
+    const root = await fixtureHome();
+    const plain = io();
+    expect(await runScan({ root, agent: true, code: CODE }, plain.io)).toBe(0);
+    mode.watched = true;
+    const watched = io();
+    expect(await runScan({ root, agent: true, code: 'K7Q3-PX9N' }, watched.io)).toBe(0);
+    expect(watched.out).toEqual(plain.out);
+    expect(watched.opened).toEqual([]);
   });
 
   it('gives up the deep read after a minute while the servers are busy', async () => {
