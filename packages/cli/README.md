@@ -12,7 +12,7 @@ Start at [agentgpa.dev/start](https://agentgpa.dev/start). Sign in with GitHub, 
 npx agentgpa@0.1.2 --code K7Q3-PX9M
 ```
 
-Run it in your terminal, or paste the prompt from /start into your agent, which runs the same command with `--agent`. A code works once, for 60 minutes. Without a code a run reads nothing and sends nothing; the flags under "See it before you say yes" read your sessions only to show you what a run would send.
+Run it in your terminal, or paste the prompt from /start into your agent, which runs the same command with `--agent`. Before it reads anything, the CLI asks you in your terminal whether the account the code is for is yours; a run with no terminal to ask in, like your agent's, needs `--to` with that account, which the prompt from /start includes. Only run a command or a prompt you got from your own /start. A code works once, for 60 minutes. Without a code a run reads nothing and sends nothing; the flags under "See it before you say yes" read your sessions only to show you what a run would send.
 
 The CLI prints no grades, quotes or findings, in your terminal or in your agent. Your report is on the website, behind your sign-in.
 
@@ -55,12 +55,13 @@ Dry run: wrote agentgpa-payload.json (38 KB gzipped, 5 quotes). It has no run to
 
 ## When it talks to the network
 
-Only a run with a code does, over HTTPS to agentgpa.dev (or the origin in `AGENTGPA_API_URL`, which makes the run report only) and nowhere else: the version check, the start of the run (two requests around a short proof of work), the report, and the deep read when you turned it on, which only ever goes to agentgpa.dev. Your report opens in the browser right after the report is sent, before the deep read, unless the agentgpa.dev page you started from is still open and following the run.
+Only a run with a code does, over HTTPS to agentgpa.dev (or the origin in `AGENTGPA_API_URL`, which makes the run report only, and which agent mode and any run with no terminal to ask in refuse) and nowhere else: the version check, the start of the run (two requests around a short proof of work), the report, and the deep read when you turned it on, which only ever goes to agentgpa.dev. Your report opens in the browser right after the report is sent, before the deep read, unless the agentgpa.dev page you started from is still open and following the run.
 
 | Flag | What it does |
 | --- | --- |
 | `--code <code>` | The link code from /start, which carries your yes |
 | `--agent` | Plain output for your own agent to relay |
+| `--to <handle>` | The GitHub handle your code is for; a run with no terminal to ask in needs it (the prompt from /start has it) |
 | `--since <period>` | The period to read: `90d` (the default), `30d`, `14d` or `7d` |
 | `--tools <list>` | Only read these tools: `claude-code,codex,cursor` |
 | `--debug` | Counts per tool, never any text from your sessions |

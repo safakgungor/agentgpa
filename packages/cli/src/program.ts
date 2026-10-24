@@ -2,7 +2,7 @@ import { PAYLOAD_SCHEMA_VERSION } from '@agentgpa/core';
 import { Command } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 import { type Io, runScan, type ScanOptions } from './run.ts';
-import { progressLine } from './terminal.ts';
+import { askYes, progressLine } from './terminal.ts';
 
 /**
  * The agentgpa command: with the link code from agentgpa.dev/start, reads your sessions and sends
@@ -13,6 +13,8 @@ export function buildProgram(
     out: (t) => console.log(t),
     err: (t) => console.error(t),
     progress: progressLine(process.stderr, process.env),
+    // Only a person at a terminal can be asked; an agent's run or a pipe is not.
+    ...(process.stdin.isTTY ? { confirm: (question: string) => askYes(question) } : {}),
   },
 ): Command {
   const program = new Command('agentgpa')
@@ -27,6 +29,10 @@ export function buildProgram(
     .helpOption('-h, --help', 'Show this help')
     .option('--code <code>', 'The link code from agentgpa.dev/start, which carries your yes')
     .option('--agent', 'Plain output for your own agent to relay (the prompt from /start)')
+    .option(
+      '--to <handle>',
+      'The GitHub handle your code is for; a run with no terminal to ask in needs it (the prompt from /start has it)',
+    )
     .option('--dry-run', 'Write exactly what would be sent to agentgpa-payload.json, send nothing')
     .option('--offline', 'No network at all: what was found and what would be sent')
     .option('--json', 'Print exactly what would be sent, send nothing')

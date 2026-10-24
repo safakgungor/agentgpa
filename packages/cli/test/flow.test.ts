@@ -144,8 +144,10 @@ beforeEach(() => {
 // The CLI calls the status, runs, reports and deep read routes and nothing else.
 afterEach(() => expect(seen.other).toEqual([]));
 
-function io(extra: Partial<Io> = {}) {
+/** A run's io. A person at the terminal says yes to the account, unless `terminal` is false. */
+function io(extra: Partial<Io> = {}, terminal = true) {
   const out: string[] = [];
+  const asked: string[] = [];
   const opened: string[] = [];
   /** The progress lines, in order, and how many deep read tries had happened at each opening. */
   const progress: string[] = [];
@@ -173,9 +175,17 @@ function io(extra: Partial<Io> = {}) {
       clock += ms;
     },
     timeZone: 'UTC',
+    ...(terminal
+      ? {
+          confirm: async (question: string) => {
+            asked.push(question);
+            return true;
+          },
+        }
+      : {}),
     ...extra,
   };
-  return { io: value, out, opened, config, progress, openedAfterTries };
+  return { io: value, out, opened, config, progress, openedAfterTries, asked };
 }
 
 /** No grade, archetype, line or quote of the fixture's report reaches the text. */
@@ -381,11 +391,116 @@ describe('without a code', () => {
   });
 });
 
+describe('whose report a run fills', () => {
+  it('asks the person at the terminal by the account, and reads nothing on a no', async () => {
+    const root = await fixtureHome();
+    const questions: string[] = [];
+    const t = io({
+      confirm: async (question) => {
+        questions.push(question);
+        return false;
+      },
+    });
+    expect(await runScan({ root, code: CODE }, t.io)).toBe(0);
+    expect(questions).toEqual(['This code sends your report to @mira-dev. Is that you? [y/N] ']);
+    expect(t.out.join('\n')).toContain(
+      'Nothing was read or sent. If that is not you, make your own code on 127.0.0.1',
+    );
+    expect(t.progress.some((line) => line.startsWith('Reading'))).toBe(false);
+    expect(seen.reports).toEqual([]);
+  });
+
+  it('names the deep read in the question when the code has it on', async () => {
+    mode.consents = { researchAggregates: true, deepRead: true };
+    const root = await fixtureHome();
+    const t = io();
+    expect(await runScan({ root, code: CODE }, t.io)).toBe(0);
+    expect(t.asked).toEqual([
+      'This code sends your report and a deep read to @mira-dev. Is that you? [y/N] ',
+    ]);
+  });
+
+  it('asks at a terminal even when the command names the account', async () => {
+    const root = await fixtureHome();
+    const t = io();
+    expect(await runScan({ root, code: CODE, to: 'mira-dev' }, t.io)).toBe(0);
+    expect(t.asked).toHaveLength(1);
+    expect(seen.reports).toHaveLength(1);
+  });
+
+  it('with no terminal, sends only when the command names the account of the code', async () => {
+    const root = await fixtureHome();
+    const unnamed = io({}, false);
+    expect(await runScan({ root, agent: true, code: CODE }, unnamed.io)).toBe(2);
+    expect(unnamed.out.join('\n')).toContain(
+      'This code sends your report to @mira-dev, and with no terminal to ask in, the command must name that account with --to. Nothing was read or sent.',
+    );
+    const other = io({}, false);
+    expect(
+      await runScan({ root, agent: true, code: 'K7Q3-PX9N', to: '@someone-else' }, other.io),
+    ).toBe(2);
+    expect(other.out.join('\n')).toContain('This code is for @mira-dev, not @someone-else.');
+    expect(seen.reports).toEqual([]);
+    // A handle matches whatever its case, with or without its @.
+    const named = io({}, false);
+    expect(await runScan({ root, code: 'K7Q3-PX9P', to: '@Mira-Dev' }, named.io)).toBe(0);
+    expect(seen.reports).toHaveLength(1);
+  });
+
+  it('never waits on the terminal of an agent that names the account', async () => {
+    const root = await fixtureHome();
+    const t = io();
+    expect(await runScan({ root, agent: true, code: CODE, to: 'mira-dev' }, t.io)).toBe(0);
+    expect(t.asked).toEqual([]);
+    expect(seen.reports).toHaveLength(1);
+  });
+
+  it('in agent mode or with no terminal, sends only to agentgpa.dev', async () => {
+    let calls = 0;
+    const offline = (async () => {
+      calls++;
+      throw new Error('no network in this test');
+    }) as typeof fetch;
+    const elsewhere = () => ({
+      AGENTGPA_CONFIG_DIR: mkdtempSync(join(tmpdir(), 'agentgpa-flow-')),
+      AGENTGPA_API_URL: 'https://api.example.org',
+    });
+    const root = await fixtureHome();
+    const agent = io({ env: elsewhere(), fetch: offline });
+    expect(await runScan({ root, agent: true, code: CODE, to: 'mira-dev' }, agent.io)).toBe(2);
+    expect(agent.out.join('\n')).toContain(
+      'Agent mode sends only to agentgpa.dev, not api.example.org. Nothing was read or sent.',
+    );
+    const piped = io({ env: elsewhere(), fetch: offline }, false);
+    expect(await runScan({ root, code: CODE, to: 'mira-dev' }, piped.io)).toBe(2);
+    expect(piped.out.join('\n')).toContain(
+      'A run with no terminal to ask in sends only to agentgpa.dev, not api.example.org.',
+    );
+    expect(calls).toBe(0);
+    expect(seen.status + seen.runs).toBe(0);
+  });
+
+  it('names any other server in the question at a terminal', async () => {
+    const root = await fixtureHome();
+    const t = io({
+      officialApi: 'https://agentgpa.example',
+      env: {
+        AGENTGPA_CONFIG_DIR: mkdtempSync(join(tmpdir(), 'agentgpa-flow-')),
+        AGENTGPA_API_URL: base,
+      },
+    });
+    expect(await runScan({ root, code: CODE }, t.io)).toBe(0);
+    expect(t.asked).toEqual([
+      `This code sends your report to @mira-dev on ${new URL(base).host}. Is that you? [y/N] `,
+    ]);
+  });
+});
+
 describe('the agent flow', () => {
   it('sends at once and prints a few neutral lines under 8,000 characters', async () => {
     const root = await fixtureHome();
-    const t = io();
-    expect(await runScan({ root, agent: true, code: CODE }, t.io)).toBe(0);
+    const t = io({}, false);
+    expect(await runScan({ root, agent: true, code: CODE, to: 'mira-dev' }, t.io)).toBe(0);
     const text = t.out.join('\n');
     expect(text.length).toBeLessThan(8000);
     expect(text).toContain('AGENT MODE · LINKED TO @mira-dev');
@@ -403,11 +518,13 @@ describe('the agent flow', () => {
 
   it('prints the same lines whether or not a page follows the run', async () => {
     const root = await fixtureHome();
-    const plain = io();
-    expect(await runScan({ root, agent: true, code: CODE }, plain.io)).toBe(0);
+    const plain = io({}, false);
+    expect(await runScan({ root, agent: true, code: CODE, to: 'mira-dev' }, plain.io)).toBe(0);
     mode.watched = true;
-    const watched = io();
-    expect(await runScan({ root, agent: true, code: 'K7Q3-PX9N' }, watched.io)).toBe(0);
+    const watched = io({}, false);
+    expect(
+      await runScan({ root, agent: true, code: 'K7Q3-PX9N', to: 'mira-dev' }, watched.io),
+    ).toBe(0);
     expect(watched.out).toEqual(plain.out);
     expect(watched.opened).toEqual([]);
   });
@@ -416,8 +533,8 @@ describe('the agent flow', () => {
     mode.consents = { researchAggregates: true, deepRead: true };
     mode.deepRead = 'swamped';
     const root = await fixtureHome();
-    const t = io();
-    expect(await runScan({ root, agent: true, code: CODE }, t.io)).toBe(0);
+    const t = io({}, false);
+    expect(await runScan({ root, agent: true, code: CODE, to: 'mira-dev' }, t.io)).toBe(0);
     const text = t.out.join('\n');
     // Tries at 0, 20, 40 and 60 seconds; the next wait would pass the minute.
     expect(seen.deepReadTries).toBe(4);
@@ -431,9 +548,9 @@ describe('the agent flow', () => {
 
   it('stops a second run of the same code before reading anything', async () => {
     const root = await fixtureHome();
-    await runScan({ root, agent: true, code: CODE }, io().io);
-    const again = io();
-    expect(await runScan({ root, agent: true, code: CODE }, again.io)).toBe(1);
+    await runScan({ root, agent: true, code: CODE, to: 'mira-dev' }, io({}, false).io);
+    const again = io({}, false);
+    expect(await runScan({ root, agent: true, code: CODE, to: 'mira-dev' }, again.io)).toBe(1);
     expect(again.out.join('\n')).toContain('That code was used already.');
     expect(seen.reports).toHaveLength(1);
   });

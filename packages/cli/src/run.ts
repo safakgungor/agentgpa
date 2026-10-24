@@ -57,6 +57,8 @@ import { detectStyle, type Style } from './terminal.ts';
 
 export const VERSION = pkg.version;
 const MAX_UPLOAD_BYTES = 1024 * 1024;
+/** A GitHub handle, as `--to` takes it, with or without its @. */
+const HANDLE = /^@?[A-Za-z0-9-]{1,39}$/;
 /**
  * How long the deep read keeps trying while the server's readers are busy. An agent's command can
  * time out, so in agent mode it gives up after a minute: the report is ready either way.
@@ -76,6 +78,8 @@ export interface ScanOptions {
   json?: boolean;
   agent?: boolean;
   code?: string;
+  /** The account the code is for, as the prompt from /start names it (`--to mira-dev`). */
+  to?: string;
   showPacket?: boolean;
 }
 
@@ -105,6 +109,11 @@ export interface Io {
    * null clears a line a terminal shows in place. Never a result, a path or session text.
    */
   progress?: (text: string | null) => void;
+  /**
+   * Asks the person at the terminal a yes or no question. Absent when no one can answer (an
+   * agent's run, a pipe): then nothing is asked.
+   */
+  confirm?: (question: string) => Promise<boolean>;
 }
 
 const TOOL_NAMES: Record<Tool, string> = {
@@ -314,6 +323,53 @@ type Online =
   | { paused: string | true }
   | { stop: string; exitCode: number };
 
+/**
+ * Whose report this run fills, settled before anything is read, since a code someone else made
+ * would send this machine's sessions to their account. A person at a terminal says whether the
+ * account is theirs, whatever the command says. With no terminal (an agent's run) the command
+ * names the account with --to, as the prompt from /start does, and an agent's own terminal is
+ * not asked when it does, since it cannot answer.
+ */
+async function whoseReport(
+  token: RunToken,
+  origin: Origin,
+  options: ScanOptions,
+  io: Io,
+): Promise<{ message: string; exitCode: number } | undefined> {
+  const handle = token.account?.handle;
+  const named = options.to?.replace(/^@/, '');
+  const same = handle !== undefined && named?.toLowerCase() === handle.toLowerCase();
+  const own = `Make your own code on ${origin.host}/start.`;
+  const unknown = `${origin.host} did not say whose code this is, so nothing was read or sent. ${own}`;
+  if (named !== undefined && !same) {
+    return {
+      message: handle
+        ? `This code is for @${handle}, not @${named}. Nothing was read or sent. ${own}`
+        : unknown,
+      exitCode: 2,
+    };
+  }
+  if (io.confirm && !(options.agent && same)) {
+    const deepRead = token.consents.deepRead && origin.isDefault ? ' and a deep read' : '';
+    const where = origin.isDefault ? '' : ` on ${origin.host}`;
+    const yes = await io.confirm(
+      `This code sends your report${deepRead} to ${handle ? `@${handle}` : 'the account that made it'}${where}. Is that you? [y/N] `,
+    );
+    if (yes) return undefined;
+    return {
+      message: `Nothing was read or sent. If that is not you, make your own code on ${origin.host}/start.`,
+      exitCode: 0,
+    };
+  }
+  if (same) return undefined;
+  return {
+    message: handle
+      ? `This code sends your report to @${handle}, and with no terminal to ask in, the command must name that account with --to. Nothing was read or sent. Copy the prompt from ${origin.host}/start again: it names the account.`
+      : unknown,
+    exitCode: 2,
+  };
+}
+
 /** The status check and the run token, both before the scan (the token proves when it began). */
 async function goOnline(origin: Origin, installId: string, code: string, io: Io): Promise<Online> {
   const api = createApi(
@@ -395,6 +451,10 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
     io.err('--code takes the 8-character link code from /start, like K7Q3-PX9M.');
     return 2;
   }
+  if (options.to !== undefined && !HANDLE.test(options.to)) {
+    io.err('--to takes the GitHub handle your code is for, like mira-dev.');
+    return 2;
+  }
   // These print what a run would send, prompts and quote candidates included, which agent mode
   // never hands to an agent.
   if (options.showPacket && options.agent) {
@@ -455,6 +515,14 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
 
   let online: Online | undefined;
   if (!local && options.code) {
+    // With no one to ask, a run sends only to agentgpa.dev: a prompt from someone else cannot
+    // point it at a server of theirs.
+    if (!origin.isDefault && !origin.isLocal && (options.agent || !io.confirm)) {
+      return stop(
+        `${options.agent ? 'Agent mode' : 'A run with no terminal to ask in'} sends only to agentgpa.dev, not ${origin.host}. Nothing was read or sent.`,
+        2,
+      );
+    }
     if (!origin.isDefault && !options.agent) {
       io.out(
         `Using ${origin.host}, not agentgpa.dev: this run is report only, and the deep read is off.`,
@@ -472,6 +540,9 @@ export async function runScan(options: ScanOptions, io: Io): Promise<number> {
       say(renderPaused(online.paused === true ? undefined : online.paused, origin.host, style));
       return 0;
     }
+    settle();
+    const refused = await whoseReport(online.token, origin, options, io);
+    if (refused) return stop(refused.message, refused.exitCode);
   }
 
   const clock = io.clock ?? Date.now;

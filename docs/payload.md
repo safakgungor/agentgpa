@@ -14,7 +14,7 @@ The payload they show has research and the deep read off and no run token. A run
 
 ## When the CLI talks to the network
 
-Only a run with a link code talks to the network. Without a code, the CLI reads nothing, sends nothing and points you to agentgpa.dev/start; with `--offline`, `--dry-run`, `--json` or `--show-packet` it makes no request at all. Every request goes through `packages/cli/src/net.ts`, to one origin: `https://agentgpa.dev`, unless `AGENTGPA_API_URL` names another (any other origin makes the run report only and turns the deep read off).
+Only a run with a link code talks to the network. Without a code, the CLI reads nothing, sends nothing and points you to agentgpa.dev/start; with `--offline`, `--dry-run`, `--json` or `--show-packet` it makes no request at all. Every request goes through `packages/cli/src/net.ts`, to one origin: `https://agentgpa.dev`, unless `AGENTGPA_API_URL` names another (any other origin makes the run report only and turns the deep read off). Agent mode, and any run with no terminal to ask in, refuse another origin before any request, unless it is this machine while developing.
 
 | Request | When | What it sends |
 | --- | --- | --- |
@@ -22,6 +22,8 @@ Only a run with a link code talks to the network. Without a code, the CLI reads 
 | `POST /api/cli/runs` | At the start, before the scan (twice: once for the proof-of-work challenge, once with its answer) | A random install id (from `~/.agentgpa/config.json`), the CLI version, the link code and the answer to a proof-of-work challenge. The answer binds the run to your account and tells the CLI your choices from /start; each code starts one run |
 | `POST /api/cli/reports` | Right after the scan | The payload, gzipped, with the run token in a header |
 | `POST /api/cli/deep-read` | Right after the report, only when you turned the deep read on, and only ever to `https://agentgpa.dev` | The packet, gzipped |
+
+Between the start of the run and the scan, the CLI settles whose report it fills, since a code someone else made would send your sessions to their account. At a terminal it asks whether the account the code is for (its GitHub handle) is yours, whatever the command says, and with no terminal to ask in it needs `--to` naming that account, as the prompt from /start does. On a no, or without a matching `--to`, nothing is read or sent; the code is spent, so a new one comes from /start.
 
 Right after the report is sent, the CLI opens your report page in the browser, unless the server answers that the page you started from is still open and following the run (in agent mode, your agent tells you where it is), then sends the deep read when you turned it on, and the run is over.
 

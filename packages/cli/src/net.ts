@@ -33,6 +33,8 @@ export interface Origin {
   url: URL;
   /** The official server. Any other origin makes the run report only and the deep read off. */
   isDefault: boolean;
+  /** This machine, while developing (http://localhost and its kin). */
+  isLocal: boolean;
   host: string;
 }
 
@@ -57,7 +59,12 @@ export function apiOrigin(env: Record<string, string | undefined>, official = DE
     throw new NetError('insecure-origin');
   }
   const origin = new URL(url.origin);
-  return { url: origin, isDefault: origin.origin === new URL(official).origin, host: origin.host };
+  return {
+    url: origin,
+    isDefault: origin.origin === new URL(official).origin,
+    isLocal: LOCAL.has(origin.hostname),
+    host: origin.host,
+  };
 }
 
 export interface Answer<T> {

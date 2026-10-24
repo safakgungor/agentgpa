@@ -2,6 +2,8 @@
 // accent color, and readable without color, where highlights become [brackets] and labels end
 // in a colon. Transcript text never reaches these helpers.
 
+import { createInterface } from 'node:readline';
+
 export const WIDTH = 80;
 export const INNER = WIDTH - 4;
 
@@ -133,6 +135,29 @@ export function progressLine(
     stream.write(`\r${ESC}[2K${text ?? ''}`);
     showing = text !== null;
   };
+}
+
+/**
+ * A yes or no question to the person at the terminal, on stderr so that piped output never holds
+ * it. Only y or yes is a yes: Enter, anything else or a closed input is a no.
+ */
+export function askYes(
+  question: string,
+  input: NodeJS.ReadableStream = process.stdin,
+  output: NodeJS.WritableStream = process.stderr,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input, output });
+    let answered = false;
+    rl.on('close', () => {
+      if (!answered) resolve(false);
+    });
+    rl.question(question, (answer) => {
+      answered = true;
+      rl.close();
+      resolve(/^\s*y(?:es)?\s*$/i.test(answer));
+    });
+  });
 }
 
 /** Words of a text in lines of at most `room` columns. */
