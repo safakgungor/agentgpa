@@ -212,7 +212,7 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/release"
           {
-            echo "agentgpa $VERSION: \`npx agentgpa@$VERSION\`, or a standalone build below for a machine without Node."
+            echo "agentgpa $VERSION: \`npx -y agentgpa@$VERSION\`, or a standalone build below for a machine without Node."
             echo
             echo "Check a download before you run it:"
             echo
