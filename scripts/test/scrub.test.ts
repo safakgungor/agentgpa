@@ -177,6 +177,52 @@ describe('the fixture scrubber', () => {
     expect(parsed.old_string.split('\n')).toHaveLength(2);
   });
 
+  it('treats JSON inside a tool output as data: its keys stay, its values do not', () => {
+    const scrubber = new Scrubber({ shiftDays: 364 });
+    const project = {
+      name: 'acme-billing',
+      status: 'ACTIVE_HEALTHY',
+      version: '17.6.1.063',
+      created_at: '2026-02-11T10:00:00.000Z',
+      rows: 1736250019,
+      ratio: 0.25,
+      errors: 0,
+      exit_code: 2,
+    };
+    const out = JSON.parse(scrubber.string(JSON.stringify({ projects: [project] }), 'text')) as {
+      projects: (typeof project)[];
+    };
+    const p = out.projects[0] as typeof project;
+    expect(Object.keys(p)).toEqual(Object.keys(project));
+    expect(p.name).not.toBe(project.name);
+    expect(p.status).not.toBe(project.status);
+    expect(p.status).toHaveLength(project.status.length);
+    expect(p.version).not.toBe(project.version);
+    // Not a date moved by the known number of days either.
+    expect(p.created_at).not.toBe('2027-02-10T10:00:00.000Z');
+    expect(p.created_at).toHaveLength(project.created_at.length);
+    expect(p.rows).not.toBe(project.rows);
+    expect(String(p.rows)).toHaveLength(String(project.rows).length);
+    expect(String(p.ratio)).toHaveLength(String(project.ratio).length);
+    // Zero stays zero and a failure stays a failure, so exit codes still read right.
+    expect(p.errors).toBe(0);
+    expect(p.exit_code).not.toBe(0);
+  });
+
+  it('keeps no value of an MCP result, not even under structural keys', () => {
+    const scrubber = new Scrubber({ shiftDays: 0 });
+    const id = 'toolu_01QqQqQqQqQqQqQqQqQqQqQq';
+    scrubber.value({ type: 'tool_use', id, name: 'mcp__acme__list', input: {} });
+    const out = scrubber.value({
+      sourceToolAssistantUUID: '11111111-2222-4333-8444-555555555555',
+      message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'listed' }] },
+      toolUseResult: { status: 'INACTIVE', total: 1736250019 },
+    }) as { toolUseResult: Record<string, unknown> };
+    const values = Object.values(out.toolUseResult);
+    expect(values).not.toContain('INACTIVE');
+    expect(values).not.toContain(1736250019);
+  });
+
   it('finds replaced text that survived in an output', () => {
     const scrubber = new Scrubber({ shiftDays: 0 });
     const out = JSON.stringify(scrubber.value(line));

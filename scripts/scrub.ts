@@ -464,10 +464,13 @@ export class Scrubber {
     return known ? this.keep(value) : this.text(value);
   }
 
-  /** Scrubs a string value seen under `key`. */
-  string(value: string, key: string): string {
+  /**
+   * Scrubs a string value seen under `key`. `data` marks the user's own data (what MCP tools
+   * take and give, and JSON found inside any text), where no value counts as structure.
+   */
+  string(value: string, key: string, data = false, dynamic = false): string {
     if (value === '') return value;
-    if (ISO.test(value)) return this.shiftIso(value);
+    if (ISO.test(value)) return data ? this.synth(value) : this.shiftIso(value);
     if (ZONE.test(value)) {
       this.note(this.replaced, value);
       return 'Etc/UTC';
@@ -475,7 +478,7 @@ export class Scrubber {
     if (COUNTER.test(value)) return this.keep(value);
     if (UUID.test(value) || PREFIXED.test(value)) return this.id(value);
     if (key === 'name' || key === 'tool_name' || key === 'toolName') return this.toolName(value);
-    if (KEEP.has(key)) {
+    if (KEEP.has(key) && !data) {
       const masked = value.replace(/mcp__[A-Za-z0-9_-]+/g, (m) => this.toolName(m));
       // A file name or a path under a structural key is data, not structure.
       const fileLike =
@@ -504,7 +507,9 @@ export class Scrubber {
       (value.startsWith('[') && value.endsWith(']'))
     ) {
       try {
-        return JSON.stringify(this.value(JSON.parse(value), key));
+        // JSON inside a string is data, a tool's output or a file's text: its values go, and
+        // its keys stay only where they name fields, since parsers read tool arguments by them.
+        return JSON.stringify(this.value(JSON.parse(value), key, dynamic, true));
       } catch {
         // Not JSON after all: plain text below.
       }
@@ -532,10 +537,10 @@ export class Scrubber {
    * Scrubs any JSON value. `key` is the property it sits under; `dynamic` makes every key
    * below data (inputs and results of MCP tools, whose keys name the user's own things).
    */
-  value(value: unknown, key = '', dynamic = false): unknown {
-    if (typeof value === 'string') return this.string(value, key);
-    if (typeof value === 'number') return this.number(value, key);
-    if (Array.isArray(value)) return value.map((v) => this.value(v, key, dynamic));
+  value(value: unknown, key = '', dynamic = false, data = dynamic): unknown {
+    if (typeof value === 'string') return this.string(value, key, data, dynamic);
+    if (typeof value === 'number') return this.number(value, key, data);
+    if (Array.isArray(value)) return value.map((v) => this.value(v, key, dynamic, data));
     if (value && typeof value === 'object') {
       const o = value as Record<string, unknown>;
       const isMcpUse =
@@ -555,16 +560,19 @@ export class Scrubber {
       for (const [k, v] of Object.entries(o)) {
         // Result blocks keep their standard keys; the structured result beside them does not.
         const below = dynamic || (isMcpUse && k === 'input') || (mcpLine && k === 'toolUseResult');
-        out[this.key(k, key, dynamic)] = this.value(v, k, below);
+        out[this.key(k, key, dynamic)] = this.value(v, k, below, data || below);
       }
       return out;
     }
     return value;
   }
 
-  private number(value: number, key: string): number {
+  private number(value: number, key: string, data = false): number {
     // What a session cost is the person's own number, and no parser reads it.
     if (/cost|usd/i.test(key)) return 0;
+    // A number in the user's data keeps only its shape. Zero stays zero, so an exit code
+    // still tells a failure from a success.
+    if (data) return this.digits(value);
     if (ROUNDED.test(key) && !LIMIT.test(key)) return significant(value);
     const day = 86_400_000;
     if (value > 1.3e12 && value < 2.3e12) return value + this.options.shiftDays * day;
@@ -572,6 +580,19 @@ export class Scrubber {
       return value + this.options.shiftDays * 86_400;
     }
     return value;
+  }
+
+  /** As many digits, none of them kept: 1736 becomes another four-digit number. */
+  private digits(value: number): number {
+    const text = String(value);
+    if (!/^-?\d+(?:\.\d+)?$/.test(text)) return value;
+    const s = this.stream(text, 'number');
+    const [whole = '', part = ''] = text.replace('-', '').split('.');
+    // A leading or a last digit is never 0, so the number keeps its length.
+    const digit = (edge: boolean) => s.pick(edge ? DIGITS.slice(1) : DIGITS);
+    const int = whole === '0' ? '0' : Array.from(whole, (_, i) => digit(i === 0)).join('');
+    const frac = Array.from(part, (_, i) => digit(i === part.length - 1)).join('');
+    return Number(`${value < 0 ? '-' : ''}${int}${frac ? `.${frac}` : ''}`);
   }
 
   /** Tokens of replaced values that still appear in `output`, minus structure that was kept. */
