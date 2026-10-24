@@ -4,7 +4,7 @@ AgentGPA reads some of the most sensitive data a developer has: agent sessions w
 
 ## Reporting a vulnerability
 
-Report it privately through GitHub: open the **Security** tab of this repository and choose **Report a vulnerability**. Please do not open a public issue.
+Report it privately through GitHub: [report a vulnerability](https://github.com/safakgungor/agentgpa/security/advisories/new), or open the **Security** tab of this repository and choose **Report a vulnerability**. If you cannot use GitHub, the contacts in [agentgpa.dev/.well-known/security.txt](https://agentgpa.dev/.well-known/security.txt) work too. Please do not open a public issue.
 
 Tell us what you found, how to reproduce it and what it affects. We aim to acknowledge a report within three business days and keep you updated until it is fixed.
 

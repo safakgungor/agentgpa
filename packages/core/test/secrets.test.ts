@@ -62,6 +62,14 @@ function corpus(): [SecretType, string][] {
 }
 
 describe('secret detection', () => {
+  it('stays linear on a long run of < inside a match', () => {
+    // Built when the test runs, like the corpus: a connection string whose password is a run of <.
+    const url = ['postgres', '://u:', '<'.repeat(50_000), '@db.internal'].join('');
+    const started = performance.now();
+    findSecrets(`connect ${url} now`);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   it('catches every sample in the corpus, by type', () => {
     for (const [type, value] of corpus()) {
       const found = findSecrets(`config = "${value}"\n`);

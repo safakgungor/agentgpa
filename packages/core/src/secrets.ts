@@ -135,8 +135,9 @@ export interface SecretCounts {
 }
 
 /** Documentation examples and templates, not secrets. */
+// `<[^<>]*>` and not `<[^>]*>`: the same matches, without a quadratic scan over a run of `<`.
 const PLACEHOLDER =
-  /example|x{6,}|your[_-]|dummy|fake|sample|placeholder|redacted|changeme|<[^>]*>|\$\{|\*{3,}|0{8,}|1234567890/i;
+  /example|x{6,}|your[_-]|dummy|fake|sample|placeholder|redacted|changeme|<[^<>]*>|\$\{|\*{3,}|0{8,}|1234567890/i;
 const LOCAL_DB = /@(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|host\.docker\.internal)(?:[:/]|$)/i;
 const TEMPLATE_CREDENTIALS =
   /:\/\/(?:user|username|postgres|root|admin|test|guest)?:(?:password|pass|passwd|secret|postgres|root|admin|test|guest|changeme)@/i;

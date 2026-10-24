@@ -41,6 +41,17 @@ describe('redaction', () => {
     expect(redact(input, context).text).toBe(expected);
   });
 
+  it('stays linear on a long run with no address in it', () => {
+    const started = performance.now();
+    for (const run of ['%'.repeat(100_000), 'a'.repeat(100_000), `x@${'a'.repeat(100_000)}`])
+      redact(run, context);
+    expect(performance.now() - started).toBeLessThan(1000);
+    // An address is still an address.
+    expect(redact('write to dev.someone+tag@example.com now', context).text).toBe(
+      'write to [email] now',
+    );
+  });
+
   it('leaves ordinary prompts alone', () => {
     for (const text of [
       'fix the tests',

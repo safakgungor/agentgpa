@@ -42,7 +42,8 @@ const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g
 const HEX = /\b[0-9a-f]{32,}\b/gi;
 const BASE64 = /[A-Za-z0-9+/]{40,}={0,2}/g;
 const TOKEN = /[A-Za-z0-9+/=_-]{20,}/g;
-const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+// Bounded as an address is (64 before the @, 255 after), so a long run without one stays linear.
+const EMAIL = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,63}/g;
 const URL_WITH_PARTS = /\b(?:https?|ftp):\/\/(?:[^\s/@]*@|[^\s?#]*[?#])\S*/gi;
 const IPV4 = /\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b/g;
 const IPV6 =
