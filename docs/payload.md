@@ -23,7 +23,7 @@ Only a run with a link code talks to the network. Without a code, the CLI reads 
 | `POST /api/cli/reports` | Right after the scan | The payload, gzipped, with the run token in a header |
 | `POST /api/cli/deep-read` | Right after the report, only when you turned the deep read on, and only ever to `https://agentgpa.dev` | The packet, gzipped |
 
-Right after the report is sent, the CLI opens your report page in the browser (in agent mode, your agent tells you where it is), then sends the deep read when you turned it on, and the run is over.
+Right after the report is sent, the CLI opens your report page in the browser, unless the server answers that the page you started from is still open and following the run (in agent mode, your agent tells you where it is), then sends the deep read when you turned it on, and the run is over.
 
 ## The payload
 

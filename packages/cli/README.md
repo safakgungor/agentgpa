@@ -55,7 +55,7 @@ Dry run: wrote agentgpa-payload.json (38 KB gzipped, 5 quotes). It has no run to
 
 ## When it talks to the network
 
-Only a run with a code does, over HTTPS to agentgpa.dev (or the origin in `AGENTGPA_API_URL`, which makes the run report only) and nowhere else: the version check, the start of the run (two requests around a short proof of work), the report, and the deep read when you turned it on, which only ever goes to agentgpa.dev. Your report opens in the browser right after the report is sent, before the deep read.
+Only a run with a code does, over HTTPS to agentgpa.dev (or the origin in `AGENTGPA_API_URL`, which makes the run report only) and nowhere else: the version check, the start of the run (two requests around a short proof of work), the report, and the deep read when you turned it on, which only ever goes to agentgpa.dev. Your report opens in the browser right after the report is sent, before the deep read, unless the agentgpa.dev page you started from is still open and following the run.
 
 | Flag | What it does |
 | --- | --- |
