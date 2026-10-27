@@ -9,7 +9,7 @@ AgentGPA grades how you work with your coding agents (Claude Code, Codex and Cur
 Start at [agentgpa.dev/start](https://agentgpa.dev/start). Sign in with GitHub, read what is read and what is sent, say yes, and the page gives you a command with a one-time code:
 
 ```bash
-npx -y agentgpa@0.1.3 --code K7Q3-PX9M
+npx -y agentgpa@0.1.4 --code K7Q3-PX9M
 ```
 
 Run it in your terminal, or paste the prompt from /start into your agent, which runs the same command with `--agent`. Before it reads anything, the CLI asks you in your terminal whether the account the code is for is yours; a run with no terminal to ask in, like your agent's, needs `--to` with that account, which the prompt from /start includes. Only run a command or a prompt you got from your own /start. A code works once, for 60 minutes. Without a code a run reads nothing and sends nothing; the flags under "See it before you say yes" read your sessions only to show you what a run would send.
