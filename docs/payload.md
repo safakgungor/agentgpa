@@ -49,7 +49,7 @@ Right after the report is sent, the CLI opens your report page in the browser, u
 | `runToken` | The one-time token for this run (absent from `--dry-run` files, which can never rank) |
 | `skeleton` | The event log (below) |
 | `fingerprints` | Up to 512 hashed provider message ids: SHA-256, the first 16 hex characters, only those that start with `00`. They let the server spot a transcript uploaded under a second account |
-| `forensics` | How many sessions the file checks left out, and why |
+| `forensics` | How many sessions the report would have held that the file checks left out, and why |
 
 ### The event log (`skeleton`)
 

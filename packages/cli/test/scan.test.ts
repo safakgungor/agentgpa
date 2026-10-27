@@ -49,6 +49,9 @@ describe('agentgpa --dry-run --debug', () => {
     expect(out).toMatch(
       /cursor: found[\s\S]*all on disk: 2 sessions, 9 prompts \(0 queued, 4 with approximate time\)/,
     );
+    expect(out).toContain(
+      "file checks: 0 sessions left out of the report, 0 more outside the period; agent's own session skipped: 0",
+    );
     expect(out).toContain('Nothing was sent.');
   });
 

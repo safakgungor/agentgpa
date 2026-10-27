@@ -202,6 +202,15 @@ export function observedWindowStart(
   return options.end - Math.min(options.days, options.observedDays[tool] ?? options.days) * DAY;
 }
 
+/** A session's events inside its tool's window: the ones a report holds. */
+export function windowEvents(
+  session: Session,
+  options: Pick<SkeletonOptions, 'end' | 'days' | 'observedDays'>,
+): Session['events'] {
+  const from = observedWindowStart(options, session.tool);
+  return session.events.filter((e) => e.ts >= from && e.ts <= options.end);
+}
+
 /** Permission and sandbox modes, by how much they let the agent do without asking. */
 const AUTONOMY: Record<string, Autonomy> = {
   default: 'ask',
@@ -332,8 +341,7 @@ export function buildSkeleton(
   const fingerprints = new Set<string>();
 
   for (const session of sessions) {
-    const from = Math.max(start, observedWindowStart(options, session.tool));
-    const events = session.events.filter((e) => e.ts >= from && e.ts <= options.end);
+    const events = windowEvents(session, options);
     if (events.length === 0) continue;
     if (
       skipText &&

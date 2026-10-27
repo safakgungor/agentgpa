@@ -26,24 +26,28 @@ export interface ToolScan {
   bytes: number;
   ms: number;
   result: ParseResult;
-  /** Per session file: its session, when it was created and its newest event. */
+  /** Per session file: its session, when it was created and its session's newest line in it. */
   fileFacts: FileFact[];
 }
 
 export interface FileFact {
   tool: Tool;
+  /** What kind of file it is, for --debug: a Claude Code file kind, or a Codex rollout. */
+  kind: string;
   sessionId: string;
   createdMs?: number;
+  /** The newest time on the session's own lines in the file. */
   newestMs?: number;
 }
 
 function fact(
   tool: Tool,
+  kind: string,
   sessionId: string,
   createdMs: number | undefined,
   newestMs: number,
 ): FileFact {
-  const f: FileFact = { tool, sessionId };
+  const f: FileFact = { tool, kind, sessionId };
   if (createdMs !== undefined) f.createdMs = createdMs;
   if (newestMs > 0) f.newestMs = newestMs;
   return f;
@@ -112,7 +116,7 @@ async function claudeCode(discovery: Discovery, hook: Hook): Promise<Omit<ToolSc
     }
     bytes += read.bytes;
     parser.stats.oversized += read.oversized;
-    fileFacts.push(fact('claude-code', file.sessionId, file.createdMs, newest));
+    fileFacts.push(fact('claude-code', file.kind, file.sessionId, file.createdMs, newest));
   }
   return {
     tool: 'claude-code',
@@ -143,7 +147,7 @@ async function codex(discovery: Discovery, hook: Hook): Promise<Omit<ToolScan, '
     }
     bytes += read.bytes;
     parser.stats.oversized += read.oversized;
-    fileFacts.push(fact('codex', file.sessionId, file.createdMs, newest));
+    fileFacts.push(fact('codex', 'rollout', file.sessionId, file.createdMs, newest));
   }
   return {
     tool: 'codex',

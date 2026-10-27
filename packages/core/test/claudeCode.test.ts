@@ -353,4 +353,24 @@ describe('skeleton v2 facts from Claude Code lines', () => {
     expect(parser.line(user('hello', {}, 5), MAIN)).toBe(Date.parse(at(5)));
     expect(parser.line('{broken', MAIN)).toBeUndefined();
   });
+
+  it("returns no time for a fork's copy of another session's line, which still joins that session", () => {
+    const parser = createClaudeCodeParser({ hash });
+    const fork: ClaudeFile = { kind: 'main', sessionId: 'fork' };
+    expect(parser.line(user('copied from the parent', {}, 5), fork)).toBeUndefined();
+    expect(parser.line(user('the fork goes on', { sessionId: 'fork' }, 50), fork)).toBe(
+      Date.parse(at(50)),
+    );
+    // A session id the parser does not take is the file's, so its time counts for the file.
+    expect(parser.line(user('odd id', { sessionId: 'not a label!' }, 51), fork)).toBe(
+      Date.parse(at(51)),
+    );
+    const sessions = parser.finish().sessions;
+    expect(
+      sessions.map((s) => [s.id, s.events.filter((e) => e.kind === 'user_prompt').length]),
+    ).toEqual([
+      ['s1', 1],
+      ['fork', 2],
+    ]);
+  });
 });

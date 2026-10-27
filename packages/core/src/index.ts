@@ -136,6 +136,7 @@ export {
   type SkeletonOptions,
   type SkeletonSession,
   type ToolRow,
+  windowEvents,
 } from './skeleton.ts';
 export { maxOf, median, percentile, share } from './stats.ts';
 export {

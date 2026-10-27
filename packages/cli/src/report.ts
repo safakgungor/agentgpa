@@ -1,4 +1,5 @@
 import { safeLabel } from '@agentgpa/core';
+import type { Forensics } from './forensics.ts';
 import type { ToolScan } from './scan.ts';
 
 // The --debug report: counts, kinds and timings only. It never prints transcript text, paths
@@ -12,6 +13,15 @@ function top(map: Record<string, number>, limit: number): string {
     .slice(0, limit)
     .map(([k, v]) => `${k} ${n(v)}`)
     .join(', ');
+}
+
+/**
+ * The file checks' line: the sessions left out that the report would have held, those outside
+ * the period, and the files that failed by tool and kind.
+ */
+export function fileChecksLine(f: Forensics, skippedSessions: number): string {
+  const files = Object.keys(f.files).length ? ` (files: ${top(f.files, 8)})` : '';
+  return `  file checks: ${n(f.excludedSessions)} sessions left out of the report, ${n(f.outsidePeriod)} more outside the period${files}; agent's own session skipped: ${n(skippedSessions)}`;
 }
 
 export interface ReportOptions {

@@ -20,6 +20,7 @@ import {
   type Session,
   TOOLS,
   type Tool,
+  windowEvents,
 } from '@agentgpa/core';
 import pkg from '../package.json' with { type: 'json' };
 import {
@@ -32,10 +33,10 @@ import { type Api, ApiError, createApi } from './api.ts';
 import { openInBrowser, reportUrl } from './browser.ts';
 import { configDir, loadConfig } from './config.ts';
 import { discover } from './discover.ts';
-import { checkFiles, type Forensics, withoutExcluded } from './forensics.ts';
+import { checkFiles, type Forensics, leaveOut } from './forensics.ts';
 import { detectLanguage } from './language.ts';
 import { apiOrigin, createNet, NetError, type Origin } from './net.ts';
-import { debugReport } from './report.ts';
+import { debugReport, fileChecksLine } from './report.ts';
 import { scan, sha256 } from './scan.ts';
 import {
   codeRefusal,
@@ -216,8 +217,11 @@ async function read(
     (tool) => io.progress?.(`Reading ${TOOL_NAMES[tool]}`),
   );
   const sessions = scans.flatMap((s) => s.result.sessions);
-  const forensics = checkFiles(scans.flatMap((s) => s.fileFacts));
-  const kept = withoutExcluded(sessions, forensics);
+  const { kept, forensics } = leaveOut(
+    sessions,
+    checkFiles(scans.flatMap((s) => s.fileFacts)),
+    (session) => windowEvents(session, window).length > 0,
+  );
   const context = redactionContext(kept, io);
   const report = buildReport(kept, {
     ...window,
@@ -238,7 +242,7 @@ async function read(
       claudeCleanupFromSettings: discovery.claude.cleanupFromSettings,
       scanMs,
     }),
-    `  file checks: ${forensics.excludedSessions} sessions left out; agent's own session skipped: ${report.device.skippedSessions}`,
+    fileChecksLine(forensics, report.device.skippedSessions),
   ].join('\n');
   return {
     report,

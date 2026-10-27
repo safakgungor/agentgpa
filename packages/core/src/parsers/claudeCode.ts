@@ -396,7 +396,12 @@ export function createClaudeCodeParser(options: ParserOptions) {
     session.add({ kind: 'user_prompt', ts, text, images: content.images, queued: true });
   }
 
-  /** Reads one line and returns its time, if it has one (for the file checks in the CLI). */
+  /**
+   * Reads one line and returns its time when the line is the file's own session's (for the file
+   * checks in the CLI). A fork copies its parent's lines, with the parent's `sessionId` and their
+   * old times, into the new session's files, so those copies say nothing about the file. A line
+   * belongs to the session the parser gives it to.
+   */
   function line(text: string, file: ClaudeFile): number | undefined {
     stats.lines++;
     let raw: unknown;
@@ -410,8 +415,10 @@ export function createClaudeCodeParser(options: ParserOptions) {
       stats.malformed++;
       return undefined;
     }
-    read(raw as Record<string, unknown>, file);
-    return toTime((raw as Record<string, unknown>).timestamp);
+    const r = raw as Record<string, unknown>;
+    read(r, file);
+    const owner = safeLabel(r.sessionId) ?? file.sessionId;
+    return owner === file.sessionId ? toTime(r.timestamp) : undefined;
   }
 
   function read(r: Record<string, unknown>, file: ClaudeFile): void {

@@ -81,6 +81,7 @@ Other prompt fields: `promptId`, `promptSource` (`sdk`, `system`), `permissionMo
 ### Traps
 
 - Resumed sessions: on 2.1.x a resumed session continues its own file, and no `uuid` appeared in two files. Older versions copied earlier lines into a new file, so every line is still deduplicated by `uuid` across all files. The same `uuid` can appear twice in one file.
+- Forks: the desktop app (`entrypoint: "claude-desktop"`, seen on 2.1.299 and 2.1.308) can go on with a session as a new one. The new main file starts with copies of the parent's lines, which keep the parent's `sessionId` and their old times, then has its own; the parent's subagent files are copied into the new session's folder, every line still the parent's. The copies come back to the parent, deduplicated by `uuid`, and the file checks skip them (below).
 - Usage is repeated on every block line of a reply (above).
 - Huge lines: tool results with base64 images and attachments with file contents reach tens of MB. Lines over 8 MB are skipped without parsing and counted; none of them is a prompt.
 - Text that is not a prompt: `last-prompt`, `queue-operation` (`content`), attachments and titles hold copies of prompt text.
@@ -180,7 +181,7 @@ Composer, bubble, request and server bubble ids are random UUID v4, so they can 
 
 ## File checks
 
-Before the skeleton is built, the CLI compares each Claude Code and Codex session file's creation time with the newest event inside it. A file created long after its newest event was written after the fact, or copied from another machine, and its session is left out of the report (the payload counts how many). Change and modification times are not used: Claude Code appends lines without timestamps to old session files (titles, modes, cost state and similar app records) and rewrites some, so a file changed weeks after its last message is normal. Creation times hold: a session file is created when its session starts. Cursor keeps every chat in one database, so the check does not apply to it. Where a file system keeps no creation time, nothing is checked.
+Before the skeleton is built, the CLI compares each Claude Code and Codex session file's creation time with the newest line of the file's own session inside it. A file created long after that line was written after the fact, or copied from another machine, and its session is left out of the report. Only the session's own lines count: a Claude Code line that names another session is a fork's copy of that session's line (Traps), and a file holding only copies is not judged, since the original it was copied from is checked in its own folder. The payload counts the sessions left out that the report would have held, those with an event in the period; `--debug` also counts those outside the period and the files that failed, by tool and kind. Change and modification times are not used: Claude Code appends lines without timestamps to old session files (titles, modes, cost state and similar app records) and rewrites some, so a file changed weeks after its last message is normal. Creation times hold: a session file is created when its session starts. Cursor keeps every chat in one database, so the check does not apply to it. Where a file system keeps no creation time, nothing is checked.
 
 ## Signals each tool records
 
@@ -189,7 +190,7 @@ Before the skeleton is built, the CLI compares each Claude Code and Codex sessio
 | Permission mode | `permissionMode` on prompts | `approval_policy` and `sandbox_policy` per turn | `unifiedMode` (agent or chat), not an approval setting |
 | Entry point | `entrypoint` on every line | `originator` and `source` in `session_meta` | Editor database or agent transcript |
 | Compaction | `compact_boundary` lines and compaction summary prompts | *not seen* | `conversationSummary` and `summarizedComposers` on bubbles |
-| Resume | The same file continues | *not seen* | *not seen* |
+| Resume | The same file continues; a fork starts a new file with copies (Traps) | *not seen* | *not seen* |
 | Built-in commands | `<command-name>` wrappers | *not seen* | `cursorCommands` on bubbles |
 | Tool errors | `tool_result.is_error` | Tool output (exit code) | `toolFormerData.status` |
 | Declines | `toolDenialKind: "user-rejected"` | *not seen* | `toolFormerData.userDecision` |
