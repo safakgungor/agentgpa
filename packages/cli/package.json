@@ -41,6 +41,6 @@
     "esbuild": "0.28.2",
     "franc-min": "6.2.0",
     "postject": "1.0.0-alpha.6",
-    "zod": "4.6.6"
+    "zod": "4.6.7"
   }
 }
