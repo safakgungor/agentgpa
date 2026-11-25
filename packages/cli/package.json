@@ -37,7 +37,7 @@
   },
   "devDependencies": {
     "@agentgpa/core": "workspace:*",
-    "commander": "15.0.0",
+    "commander": "15.1.0",
     "esbuild": "0.28.2",
     "franc-min": "6.2.0",
     "postject": "1.0.0-alpha.6",
